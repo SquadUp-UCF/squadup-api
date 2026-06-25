@@ -1,6 +1,6 @@
 require("dotenv").config(); // require env file
 console.log("URI loaded:", !!process.env.MONGO_URI); // should print true
-const express = require("express");
+const express = require("express"); // server that seperately talks to db
 const connectDB = require("./db"); 
 
 const app = express();
