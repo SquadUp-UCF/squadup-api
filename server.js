@@ -1,3 +1,6 @@
+const cors = require("cors");
+app.use(cors());
+
 require("dotenv").config(); // require env file
 console.log("URI loaded:", !!process.env.MONGO_URI); // should print true
 const express = require("express"); // server that seperately talks to db
