@@ -95,6 +95,18 @@ by **Swagger** at **`/api/docs`**.
 
 The API listens on `http://localhost:${PORT}` with docs at `/api/docs`.
 
+## `models/` (reference only)
+
+The `models/` directory holds legacy **Express/Mongoose** schemas from earlier
+work (Game, Rating, Report, Notification, DeviceToken, GameFollow,
+EmailVerificationCode). They are **not** used by the NestJS app and are kept only
+as reference for porting those features into NestJS `@Schema` classes later.
+
+> Note: the legacy `User` model there included a skill-rating system and a
+> boolean `account_status`. This service intentionally diverges — **no skill
+> ratings**, an `account_status` enum, and `reputation` defaulting to 5.0 — see
+> the User model table above. This divergence should be reconciled with the team.
+
 ## Contributing
 
 See [`CLAUDE.md`](./CLAUDE.md) and [`constitution.md`](./constitution.md) for
