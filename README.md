@@ -49,6 +49,7 @@ src/
 | `is_flaker` | boolean | derived later from `no_show_count` *(deferred)* |
 | `reputation_reports` | number | trash-talk/dirty-play reports; suspend-at-10 logic *(deferred)* |
 | `account_status` | enum | `pending` \| `active` \| `suspended` (single source of truth for suspension; `pending` = school email unverified) |
+| `preferred_positions` | Map<string,string> | preferred position per sport, one each (e.g. `{ soccer: 'GK' }`); positions are free text |
 | `games_created` | ObjectId[] | refs to `Game` *(wired with Game schema later)* |
 | `games_joined` | ObjectId[] | refs to `Game` *(wired with Game schema later)* |
 | `deleted_at` | Date \| null | soft-delete marker |
@@ -63,7 +64,7 @@ All routes are prefixed with `/api`.
 | POST | `/auth/register` | — | Create an account; returns `{ token, user }` |
 | POST | `/auth/login` | — | Log in; returns `{ token, user }` |
 | GET | `/users/me` | JWT | Authenticated user's full profile |
-| PATCH | `/users/me` | JWT | Update `first_name` / `last_name` / `username` |
+| PATCH | `/users/me` | JWT | Update `first_name` / `last_name` / `username` / `preferred_positions` |
 | DELETE | `/users/me` | JWT | Soft-delete own account (record retained, login blocked) |
 | GET | `/users/:id` | JWT | Another player's **public** profile (no email/password) |
 

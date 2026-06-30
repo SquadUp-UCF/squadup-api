@@ -3,7 +3,13 @@
  * update any subset of their editable profile.
  */
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class UpdateProfileDto {
   @ApiPropertyOptional({ example: 'Alex' })
@@ -24,4 +30,14 @@ export class UpdateProfileDto {
   @MinLength(3)
   @MaxLength(30)
   username?: string;
+
+  @ApiPropertyOptional({
+    description: 'Preferred position per sport (one each), keyed by sport.',
+    example: { soccer: 'GK', basketball: 'PG' },
+    type: 'object',
+    additionalProperties: { type: 'string' },
+  })
+  @IsOptional()
+  @IsObject()
+  preferred_positions?: Record<string, string>;
 }

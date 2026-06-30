@@ -64,6 +64,11 @@ export class User {
   })
   account_status: AccountStatus;
 
+  // Preferred playing position per sport — one position each, keyed by sport
+  // (e.g. { soccer: 'GK', basketball: 'PG' }). Positions are free text for now.
+  @Prop({ type: Map, of: String, default: {} })
+  preferred_positions: Map<string, string>;
+
   // Games hosted by this user. Fully wired once the Game schema exists.
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Game' }], default: [] })
   games_created: Types.ObjectId[];

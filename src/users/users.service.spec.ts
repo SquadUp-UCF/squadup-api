@@ -139,6 +139,7 @@ describe('UsersService', () => {
           reputation: 5,
           is_flaker: false,
           account_status: AccountStatus.Active,
+          preferred_positions: new Map([['soccer', 'GK']]),
           games_created: ['a', 'b'],
           games_joined: ['c'],
         }),
@@ -154,6 +155,7 @@ describe('UsersService', () => {
         reputation: 5,
         is_flaker: false,
         account_status: AccountStatus.Active,
+        preferred_positions: { soccer: 'GK' },
         games_created: 2,
         games_joined: 1,
       });
