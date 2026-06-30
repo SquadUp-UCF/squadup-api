@@ -106,8 +106,3 @@ as reference for porting those features into NestJS `@Schema` classes later.
 > boolean `account_status`. This service intentionally diverges — **no skill
 > ratings**, an `account_status` enum, and `reputation` defaulting to 5.0 — see
 > the User model table above. This divergence should be reconciled with the team.
-
-## Contributing
-
-See [`CLAUDE.md`](./CLAUDE.md) and [`constitution.md`](./constitution.md) for
-branching, commit, and PR conventions.
