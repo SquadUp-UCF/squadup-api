@@ -98,6 +98,7 @@ All routes are prefixed with `/api`.
 | GET | `/users/:id` | JWT | Another player's **public** profile (no email/password) |
 | POST | `/games` | JWT | Host a game (host auto-joins the roster) |
 | GET | `/games` | JWT | Discover games; filter by `sport`, `status`, `upcoming` |
+| GET | `/games/mine` | JWT | Games you host or actively play in; filter by `role`, `status` |
 | GET | `/games/:id` | JWT | A single game |
 | PATCH | `/games/:id` | JWT | Edit a game (**host only**) |
 | POST | `/games/:id/join` | JWT | Join a game's roster |
