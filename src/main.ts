@@ -2,11 +2,13 @@
  * Application entry point.
  *
  * Boots the NestJS app and wires up the cross-cutting concerns that every
- * request relies on: a global `/api` route prefix, request validation, CORS,
- * and the Swagger documentation UI.
+ * request relies on: a global `/api` route prefix, CORS, and the Swagger
+ * documentation UI.
+ *
+ * There is intentionally no global `ValidationPipe`: each service validates its
+ * own payloads explicitly (see `common/validation/validate-dto.ts`).
  */
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
@@ -15,16 +17,6 @@ async function bootstrap() {
 
   // All routes are served under `/api` (keeps URLs like `/api/auth/login`).
   app.setGlobalPrefix('api');
-
-  // Validate every incoming payload against its DTO. `whitelist` strips unknown
-  // properties; `transform` coerces payloads into their DTO class instances.
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
 
   // Allow browser clients (the mobile/web app) to call the API.
   app.enableCors();

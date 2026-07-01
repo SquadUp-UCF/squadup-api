@@ -13,6 +13,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User, UserDocument } from './schemas/user.schema';
+import { validateDto } from '../common/validation/validate-dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
 /** Fields safe to expose when another player views a profile. */
@@ -80,8 +81,10 @@ export class UsersService {
    */
   async updateProfile(
     id: string,
-    dto: UpdateProfileDto,
+    payload: UpdateProfileDto,
   ): Promise<UserDocument> {
+    const dto = await validateDto(UpdateProfileDto, payload);
+
     if (dto.username) {
       const clash = await this.userModel
         .findOne({ username: dto.username, _id: { $ne: id } })

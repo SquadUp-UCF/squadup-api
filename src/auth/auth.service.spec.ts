@@ -1,5 +1,9 @@
 import { Test } from '@nestjs/testing';
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { AuthService } from './auth.service';
@@ -55,6 +59,20 @@ describe('AuthService', () => {
         user: { id: 'user-id', name: 'Alex Rivera', username: 'alex_r' },
       });
       expect(jwtService.sign).toHaveBeenCalledWith({ sub: 'user-id' });
+    });
+
+    it('rejects an invalid payload with 400 before hashing or persisting', async () => {
+      await expect(
+        service.register({ ...registerDto, email: 'not-an-email' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(usersService.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects unknown properties in the payload with 400', async () => {
+      await expect(
+        service.register({ ...registerDto, is_admin: true } as never),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(usersService.create).not.toHaveBeenCalled();
     });
   });
 

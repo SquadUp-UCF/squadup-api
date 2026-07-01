@@ -14,6 +14,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { UsersService } from '../users/users.service';
 import { AccountStatus, UserDocument } from '../users/schemas/user.schema';
+import { validateDto } from '../common/validation/validate-dto';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
@@ -30,7 +31,9 @@ export class AuthService {
   ) {}
 
   /** Register a new user: hash the password with Argon2id, then persist. */
-  async register(dto: RegisterDto): Promise<AuthResponse> {
+  async register(payload: RegisterDto): Promise<AuthResponse> {
+    const dto = await validateDto(RegisterDto, payload);
+
     const passwordHash = await argon2.hash(dto.password, {
       type: argon2.argon2id,
     });
@@ -47,7 +50,9 @@ export class AuthService {
   }
 
   /** Authenticate by email + password and issue a token. */
-  async login(dto: LoginDto): Promise<AuthResponse> {
+  async login(payload: LoginDto): Promise<AuthResponse> {
+    const dto = await validateDto(LoginDto, payload);
+
     // Must explicitly request the password — it is `select: false` by default.
     const user = await this.usersService.findByEmail(dto.email, true);
 

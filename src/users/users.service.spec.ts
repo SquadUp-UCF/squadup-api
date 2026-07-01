@@ -1,6 +1,10 @@
 import { Test } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { UsersService } from './users.service';
 import { User, AccountStatus } from './schemas/user.schema';
 
@@ -82,6 +86,14 @@ describe('UsersService', () => {
   });
 
   describe('updateProfile', () => {
+    it('throws 400 for an invalid field before touching the database', async () => {
+      await expect(
+        service.updateProfile('user-id', { username: 'ab' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(model.findOne).not.toHaveBeenCalled();
+      expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
     it('throws 409 when the new username is taken by another user', async () => {
       model.findOne.mockReturnValue(queryStub({ id: 'someone-else' }));
       await expect(
