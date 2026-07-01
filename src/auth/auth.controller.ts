@@ -6,10 +6,14 @@
  */
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
+// Credential endpoints are prime abuse targets (brute force, enumeration,
+// signup spam), so cap them tighter than the global default: 10/min per IP.
+@Throttle({ default: { ttl: 60_000, limit: 10 } })
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {

@@ -1,5 +1,15 @@
 openapi: 3.0.0
 paths:
+  /api/metrics:
+    get:
+      operationId: MetricsController_scrape
+      summary: Prometheus metrics exposition
+      parameters: []
+      responses:
+        '200':
+          description: ''
+      tags:
+        - metrics
   /api/auth/register:
     post:
       operationId: AuthController_register
