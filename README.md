@@ -134,6 +134,11 @@ The limiter uses an **in-memory** store, which is correct for a single process.
 If the API is ever run clustered (e.g. pm2 cluster mode) or across multiple
 hosts, switch to a shared store (e.g. Redis) so limits are enforced consistently.
 
+> **Behind a proxy:** rate limiting keys on the client IP. In production the API
+> sits behind a reverse proxy, so set **`TRUST_PROXY=1`** — otherwise Express
+> sees the proxy's IP and everyone shares one bucket. Leave it unset for
+> local/direct runs.
+
 ## Observability
 
 Prometheus metrics are exposed at **`GET /api/metrics`**. The first metric
@@ -162,6 +167,7 @@ protecting registration.
    | `JWT_EXPIRES_IN` | Token lifetime, e.g. `1d` |
    | `PORT` | HTTP port (default `5000`) |
    | `PWNED_PASSWORD_CHECK` | Optional; set to `false` to disable the Have I Been Pwned breach check (default enabled) |
+   | `TRUST_PROXY` | Optional; trusted proxy hops when behind a reverse proxy (set `1` in prod). Unset for local/direct runs |
 3. Run it:
    ```bash
    npm run start:dev   # watch mode

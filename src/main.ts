@@ -9,12 +9,31 @@
  * own payloads explicitly (see `common/validation/validate-dto.ts`).
  */
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { buildSwaggerConfig } from './swagger.config';
 
+/** Parse the TRUST_PROXY env value into what Express `trust proxy` expects. */
+function parseTrustProxy(value: string): boolean | number | string {
+  if (/^\d+$/.test(value)) return Number(value); // hop count, e.g. "1"
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return value; // e.g. "loopback", a subnet, or a comma-list
+}
+
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // In production the API sits behind a reverse proxy (e.g. nginx), so the
+  // socket IP is the proxy's. Trusting the proxy makes Express use the real
+  // client IP from X-Forwarded-For — which the rate limiter keys on, so limits
+  // are per client rather than shared across everyone behind the proxy.
+  // Config-driven: set TRUST_PROXY=1 in prod; unset (dev/direct) trusts nobody.
+  const trustProxy = process.env.TRUST_PROXY;
+  if (trustProxy) {
+    app.set('trust proxy', parseTrustProxy(trustProxy));
+  }
 
   // All routes are served under `/api` (keeps URLs like `/api/auth/login`).
   app.setGlobalPrefix('api');
