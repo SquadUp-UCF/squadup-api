@@ -2,7 +2,7 @@ name: Deploy to server
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
 
 jobs:
   deploy:
@@ -16,8 +16,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
           script: |
-            cd ~/squad-up
-            git pull origin main
-            cd backend
+            cd ~/squadup-api
+            git pull origin master
             npm install
             pm2 restart squad-up-api
