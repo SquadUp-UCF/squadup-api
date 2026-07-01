@@ -1,0 +1,26 @@
+# Local development database.
+#
+# Runs MongoDB only — the API itself runs on the host via `npm run start:dev`
+# so you keep fast watch-mode reloads. This Mongo is entirely separate from the
+# production database (which lives on the deploy server), so nothing here can
+# touch prod data.
+#
+# Usage:
+#   docker compose up -d              # start Mongo in the background
+#   # point your .env at it, e.g.:
+#   #   MONGO_URI=mongodb://localhost:27017/squadup_dev
+#   npm run start:dev
+#   docker compose down               # stop it (data persists in the volume)
+#   docker compose down -v            # stop and wipe the database volume
+services:
+  mongo:
+    image: mongo:7
+    container_name: squadup-mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - squadup-mongo-data:/data/db
+
+volumes:
+  squadup-mongo-data:

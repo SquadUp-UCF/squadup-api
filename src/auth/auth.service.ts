@@ -6,6 +6,7 @@
  * soft-deleted accounts cannot log in.
  */
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   UnauthorizedException,
@@ -17,6 +18,7 @@ import { AccountStatus, UserDocument } from '../users/schemas/user.schema';
 import { validateDto } from '../common/validation/validate-dto';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { PwnedPasswordService } from './pwned-password.service';
 
 export interface AuthResponse {
   token: string;
@@ -28,11 +30,19 @@ export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    private readonly pwnedPasswordService: PwnedPasswordService,
   ) {}
 
   /** Register a new user: hash the password with Argon2id, then persist. */
   async register(payload: RegisterDto): Promise<AuthResponse> {
     const dto = await validateDto(RegisterDto, payload);
+
+    // Reject passwords known to have appeared in a public breach.
+    if (await this.pwnedPasswordService.isPwned(dto.password)) {
+      throw new BadRequestException(
+        'This password has appeared in a known data breach; please choose another.',
+      );
+    }
 
     const passwordHash = await argon2.hash(dto.password, {
       type: argon2.argon2id,
