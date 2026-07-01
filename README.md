@@ -144,6 +144,39 @@ by **Swagger** at **`/api/docs`**.
 
 The API listens on `http://localhost:${PORT}` with docs at `/api/docs`.
 
+### Local database with Docker
+
+You need a MongoDB to run the app locally. The bundled Compose file starts one
+that is **completely separate from production** (production's database lives on
+the deploy server), so local work can never touch prod data:
+
+```bash
+docker compose up -d          # start Mongo on localhost:27017
+# point .env at a dev database, e.g.:
+#   MONGO_URI=mongodb://localhost:27017/squadup_dev
+npm run start:dev
+docker compose down           # stop (data persists in the volume)
+docker compose down -v        # stop and wipe the data volume
+```
+
+Using a distinct database name (e.g. `squadup_dev`) keeps manual testing data
+isolated from anything else in that Mongo instance.
+
+## Testing
+
+```bash
+npm test          # unit tests — services with mocked Mongoose models (no DB)
+npm run test:e2e  # end-to-end HTTP tests against an in-memory MongoDB
+```
+
+- **Unit tests** (`*.spec.ts` under `src/`) mock the database and external calls,
+  so they need no Mongo and no network.
+- **E2E tests** (`test/*.e2e-spec.ts`) boot the whole app against an ephemeral
+  **`mongodb-memory-server`** — a throwaway Mongo spun up per run and discarded
+  after — so they exercise routing, JWT guards, validation, and real persistence
+  without any external database. They also set `PWNED_PASSWORD_CHECK=false` so no
+  outbound breach-check call is made.
+
 ## `models/` (reference only)
 
 The `models/` directory holds legacy **Express/Mongoose** schemas from earlier
