@@ -34,6 +34,12 @@ src/
 - **Password policy** (enforced on `POST /auth/register`): **8–20 characters**,
   with at least **one uppercase letter, one lowercase letter, one number, and one
   symbol** (any non-alphanumeric character).
+- **Breach check:** registration also rejects passwords found in the
+  [Have I Been Pwned](https://haveibeenpwned.com/Passwords) corpus, using the
+  **range (k-anonymity) API** — only the first 5 characters of the password's
+  SHA-1 hash are sent, so the password never leaves the server. The check
+  **fails open** (a HIBP outage won't block signups) and can be disabled with
+  `PWNED_PASSWORD_CHECK=false`.
 - A successful register/login returns a **JWT** (`@nestjs/jwt`) signed with
   `JWT_SECRET`.
 - Protected routes use a Passport **JWT strategy** + `JwtAuthGuard`. The strategy
@@ -128,6 +134,7 @@ by **Swagger** at **`/api/docs`**.
    | `JWT_SECRET` | Secret used to sign JWTs |
    | `JWT_EXPIRES_IN` | Token lifetime, e.g. `1d` |
    | `PORT` | HTTP port (default `5000`) |
+   | `PWNED_PASSWORD_CHECK` | Optional; set to `false` to disable the Have I Been Pwned breach check (default enabled) |
 3. Run it:
    ```bash
    npm run start:dev   # watch mode

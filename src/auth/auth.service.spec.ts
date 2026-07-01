@@ -8,22 +8,27 @@ import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
+import { PwnedPasswordService } from './pwned-password.service';
 import { AccountStatus } from '../users/schemas/user.schema';
 
 describe('AuthService', () => {
   let service: AuthService;
   let usersService: { create: jest.Mock; findByEmail: jest.Mock };
   let jwtService: { sign: jest.Mock };
+  let pwnedPasswordService: { isPwned: jest.Mock };
 
   beforeEach(async () => {
     usersService = { create: jest.fn(), findByEmail: jest.fn() };
     jwtService = { sign: jest.fn().mockReturnValue('signed.jwt.token') };
+    // Default: password is not breached; individual tests override as needed.
+    pwnedPasswordService = { isPwned: jest.fn().mockResolvedValue(false) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         AuthService,
         { provide: UsersService, useValue: usersService },
         { provide: JwtService, useValue: jwtService },
+        { provide: PwnedPasswordService, useValue: pwnedPasswordService },
       ],
     }).compile();
 
@@ -103,6 +108,17 @@ describe('AuthService', () => {
       await expect(
         service.register({ ...registerDto, password: 'Str0ng#Pass' }),
       ).resolves.toHaveProperty('token');
+    });
+
+    it('rejects a breached password with 400 without persisting', async () => {
+      pwnedPasswordService.isPwned.mockResolvedValue(true);
+      await expect(service.register(registerDto)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(pwnedPasswordService.isPwned).toHaveBeenCalledWith(
+        registerDto.password,
+      );
+      expect(usersService.create).not.toHaveBeenCalled();
     });
   });
 
