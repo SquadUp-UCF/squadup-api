@@ -29,6 +29,8 @@ src/
 
 **Auth flow**
 
+- **UCF-only registration:** `POST /auth/register` accepts only **`@ucf.edu`**
+  email addresses (case-insensitive); any other domain is rejected with `400`.
 - Passwords are hashed with **Argon2id** (`argon2`) at registration and verified
   at login.
 - **Password policy** (enforced on `POST /auth/register`): **8–20 characters**,
