@@ -1,13 +1,14 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
+const { Schema } = mongoose;
 
-const emailCodeSchema = new mongoose.Schema({
-  email: { type: String, required: true },
+const verificationCodeSchema = new Schema({
+  email: { type: String, required: true, lowercase: true },
   code: { type: String, required: true },
-  used: { type: Boolean , default: false},
-  expires_at: { type: Date , required: true },
-  
+  expiresAt: { type: Date, required: true },
+  used: { type: Boolean, default: false }
 }, { timestamps: true });
 
-emailCodeSchema.index({ expires_at: 1 }, { expireAfterSeconds: 0 });
+verificationCodeSchema.index({ email: 1, used: 1, expiresAt: 1 });
+verificationCodeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
-module.exports = mongoose.model("EmailVerificationCode", emailCodeSchema); // exports as model
+module.exports = mongoose.model('VerificationCode', verificationCodeSchema);
