@@ -39,7 +39,7 @@ describe('AuthService', () => {
     first_name: 'Alex',
     last_name: 'Rivera',
     username: 'alex_r',
-    email: 'alex@school.edu',
+    email: 'alex@ucf.edu',
     password: 'Passw0rd!',
   };
 
@@ -78,6 +78,31 @@ describe('AuthService', () => {
         service.register({ ...registerDto, is_admin: true } as never),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(usersService.create).not.toHaveBeenCalled();
+    });
+
+    // Registration is restricted to UCF email addresses (@ucf.edu).
+    it.each([
+      'alex@gmail.com',
+      'alex@knights.ucf.edu',
+      'alex@ucf.edu.evil.com',
+      'alex@notucf.edu',
+    ])('rejects a non-UCF email (%s) with 400', async (email) => {
+      await expect(
+        service.register({ ...registerDto, email }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(usersService.create).not.toHaveBeenCalled();
+    });
+
+    it('accepts a @ucf.edu email regardless of case', async () => {
+      usersService.create.mockResolvedValue({
+        id: 'user-id',
+        first_name: 'Alex',
+        last_name: 'Rivera',
+        username: 'alex_r',
+      });
+      await expect(
+        service.register({ ...registerDto, email: 'Alex@UCF.EDU' }),
+      ).resolves.toHaveProperty('token');
     });
 
     // Policy: 8–20 chars, >=1 uppercase, >=1 lowercase, >=1 number, >=1 symbol.
@@ -123,7 +148,7 @@ describe('AuthService', () => {
   });
 
   describe('login', () => {
-    const loginDto = { email: 'alex@school.edu', password: 'password123' };
+    const loginDto = { email: 'alex@ucf.edu', password: 'password123' };
 
     const buildUser = async (overrides = {}) => ({
       id: 'user-id',

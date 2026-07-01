@@ -313,7 +313,8 @@ components:
           description: Unique public handle
         email:
           type: string
-          example: alex@school.edu
+          example: alex@ucf.edu
+          description: Must be a UCF email address (@ucf.edu).
         password:
           type: string
           example: Passw0rd!
@@ -333,7 +334,7 @@ components:
       properties:
         email:
           type: string
-          example: alex@school.edu
+          example: alex@ucf.edu
         password:
           type: string
           example: password123

@@ -27,8 +27,14 @@ export class RegisterDto {
   @MaxLength(30)
   username: string;
 
-  @ApiProperty({ example: 'alex@school.edu' })
+  @ApiProperty({
+    example: 'alex@ucf.edu',
+    description: 'Must be a UCF email address (@ucf.edu).',
+  })
   @IsEmail()
+  @Matches(/@ucf\.edu$/i, {
+    message: 'Registration is restricted to UCF email addresses (@ucf.edu)',
+  })
   email: string;
 
   @ApiProperty({

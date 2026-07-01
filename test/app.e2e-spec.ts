@@ -23,14 +23,14 @@ describe('SquadUp API (e2e)', () => {
     first_name: 'Alice',
     last_name: 'Ng',
     username: 'alice_ng',
-    email: 'alice@school.edu',
+    email: 'alice@ucf.edu',
     password,
   };
   const bob = {
     first_name: 'Bob',
     last_name: 'Ito',
     username: 'bob_ito',
-    email: 'bob@school.edu',
+    email: 'bob@ucf.edu',
     password,
   };
 
@@ -80,7 +80,14 @@ describe('SquadUp API (e2e)', () => {
   it('rejects a password that violates the policy with 400', async () => {
     await request(server())
       .post('/api/auth/register')
-      .send({ ...alice, email: 'weak@school.edu', username: 'weak', password: 'weak' })
+      .send({ ...alice, email: 'weak@ucf.edu', username: 'weak', password: 'weak' })
+      .expect(400);
+  });
+
+  it('rejects a non-UCF email with 400', async () => {
+    await request(server())
+      .post('/api/auth/register')
+      .send({ ...alice, email: 'someone@gmail.com', username: 'outsider' })
       .expect(400);
   });
 
