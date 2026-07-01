@@ -1,0 +1,400 @@
+openapi: 3.0.0
+paths:
+  /api/auth/register:
+    post:
+      operationId: AuthController_register
+      summary: Register a new user
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDto'
+      responses:
+        '201':
+          description: User created; returns token + user.
+        '409':
+          description: Email or username already in use.
+      tags: &ref_0
+        - auth
+  /api/auth/login:
+    post:
+      operationId: AuthController_login
+      summary: Log in with email and password
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginDto'
+      responses:
+        '200':
+          description: Returns token + user.
+        '401':
+          description: Invalid credentials.
+        '403':
+          description: Account suspended.
+      tags: *ref_0
+  /api/users/me:
+    get:
+      operationId: UsersController_getMe
+      summary: Get the authenticated user's profile
+      parameters: []
+      responses:
+        '200':
+          description: The current user profile.
+        '401':
+          description: Missing or invalid token.
+      tags: &ref_1
+        - users
+      security: &ref_2
+        - bearer: []
+    patch:
+      operationId: UsersController_updateMe
+      summary: Update the authenticated user's profile
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileDto'
+      responses:
+        '200':
+          description: Updated profile.
+        '409':
+          description: Username already in use.
+      tags: *ref_1
+      security: *ref_2
+    delete:
+      operationId: UsersController_deleteMe
+      summary: Soft-delete the authenticated account
+      parameters: []
+      responses:
+        '204':
+          description: Account soft-deleted.
+      tags: *ref_1
+      security: *ref_2
+  /api/users/{id}:
+    get:
+      operationId: UsersController_getPublicProfile
+      summary: View another player's public profile
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Public profile fields only.
+        '404':
+          description: User not found.
+      tags: *ref_1
+      security: *ref_2
+  /api/games:
+    post:
+      operationId: GamesController_create
+      summary: Host a new game
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGameDto'
+      responses:
+        '201':
+          description: The created game.
+        '400':
+          description: Invalid payload.
+      tags: &ref_3
+        - games
+      security: &ref_4
+        - bearer: []
+    get:
+      operationId: GamesController_findMany
+      summary: Discover games
+      parameters:
+        - name: sport
+          required: false
+          in: query
+          schema:
+            example: soccer
+            type: string
+        - name: status
+          required: false
+          in: query
+          schema:
+            enum:
+              - open
+              - confirmed
+              - locked
+              - completed
+              - cancelled
+            type: string
+        - name: upcoming
+          required: false
+          in: query
+          description: Only games whose start_time is in the future.
+          schema:
+            default: true
+            type: boolean
+      responses:
+        '200':
+          description: Matching games.
+      tags: *ref_3
+      security: *ref_4
+  /api/games/{id}:
+    get:
+      operationId: GamesController_findOne
+      summary: Get a single game
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The game.
+        '404':
+          description: Game not found.
+      tags: *ref_3
+      security: *ref_4
+    patch:
+      operationId: GamesController_update
+      summary: Edit a game (host only)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGameDto'
+      responses:
+        '200':
+          description: The updated game.
+        '403':
+          description: Only the host can edit.
+      tags: *ref_3
+      security: *ref_4
+  /api/games/{id}/join:
+    post:
+      operationId: GamesController_join
+      summary: Join a game
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The joined game.
+        '400':
+          description: Game full/started or already joined.
+      tags: *ref_3
+      security: *ref_4
+  /api/games/{id}/leave:
+    post:
+      operationId: GamesController_leave
+      summary: Leave a game
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The updated game.
+        '400':
+          description: Host cannot leave / not on roster.
+      tags: *ref_3
+      security: *ref_4
+  /api/games/{id}/cancel:
+    post:
+      operationId: GamesController_cancel
+      summary: Cancel a game (host only)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The cancelled game.
+        '403':
+          description: Only the host can cancel.
+      tags: *ref_3
+      security: *ref_4
+  /api/games/{id}/complete:
+    post:
+      operationId: GamesController_complete
+      summary: Mark a game completed (host only)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The completed game.
+        '403':
+          description: Only the host can complete.
+      tags: *ref_3
+      security: *ref_4
+info:
+  title: SquadUp API
+  description: Authentication, user, and games endpoints for the SquadUp sports social app.
+  version: 0.1.0
+  contact: {}
+tags: []
+servers: []
+components:
+  securitySchemes:
+    bearer:
+      scheme: bearer
+      bearerFormat: JWT
+      type: http
+  schemas:
+    RegisterDto:
+      type: object
+      properties:
+        first_name:
+          type: string
+          example: Alex
+        last_name:
+          type: string
+          example: Rivera
+        username:
+          type: string
+          example: alex_r
+          description: Unique public handle
+        email:
+          type: string
+          example: alex@school.edu
+        password:
+          type: string
+          example: password123
+          minLength: 8
+      required:
+        - first_name
+        - last_name
+        - username
+        - email
+        - password
+    LoginDto:
+      type: object
+      properties:
+        email:
+          type: string
+          example: alex@school.edu
+        password:
+          type: string
+          example: password123
+      required:
+        - email
+        - password
+    UpdateProfileDto:
+      type: object
+      properties:
+        first_name:
+          type: string
+          example: Alex
+        last_name:
+          type: string
+          example: Rivera
+        username:
+          type: string
+          example: alex_r
+          description: Unique public handle
+        preferred_positions:
+          type: object
+          description: Preferred position per sport (one each), keyed by sport.
+          example:
+            soccer: GK
+            basketball: PG
+          additionalProperties:
+            type: string
+    CreateGameDto:
+      type: object
+      properties:
+        sport:
+          type: string
+          example: soccer
+        description:
+          type: string
+          example: Casual 5-a-side, all levels welcome.
+        location:
+          type: string
+          example: North Campus Field 2
+        start_time:
+          type: string
+          example: '2026-07-15T18:00:00.000Z'
+          description: Kickoff time (ISO 8601). Must be in the future.
+        latitude:
+          type: number
+          example: 40.7128
+        longitude:
+          type: number
+          example: -74.006
+        min_players:
+          type: number
+          example: 6
+          description: Roster size that confirms the game.
+        max_players:
+          type: number
+          example: 10
+          description: Roster size that locks the game.
+        photo_url:
+          type: string
+          example: https://cdn.squadup.app/games/abc.jpg
+      required:
+        - sport
+        - location
+        - start_time
+        - latitude
+        - longitude
+        - min_players
+        - max_players
+    UpdateGameDto:
+      type: object
+      properties:
+        sport:
+          type: string
+          example: soccer
+        description:
+          type: string
+          example: Casual 5-a-side, all levels welcome.
+        location:
+          type: string
+          example: North Campus Field 2
+        start_time:
+          type: string
+          example: '2026-07-15T18:00:00.000Z'
+        latitude:
+          type: number
+          example: 40.7128
+        longitude:
+          type: number
+          example: -74.006
+        min_players:
+          type: number
+          example: 6
+        max_players:
+          type: number
+          example: 10
+        photo_url:
+          type: string
+          example: https://cdn.squadup.app/games/abc.jpg

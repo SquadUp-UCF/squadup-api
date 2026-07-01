@@ -4,9 +4,10 @@ Backend API for **SquadUp**, a sports social app where players find, host, and
 join pickup games. This service is built with **NestJS** on top of **MongoDB**
 (via Mongoose).
 
-> This repository currently implements the **authentication** and **user
-> profile** foundation. Other product areas (games/feed, map, reputation
-> actions, push notifications) are planned and noted as deferred below.
+> This repository currently implements the **authentication**, **user
+> profile**, and **games** (host / discover / join lifecycle) foundations. Other
+> product areas (map/geo search, reputation actions, ratings, push
+> notifications) are planned and noted as deferred below.
 
 ## Architecture
 
@@ -16,12 +17,14 @@ schema.
 
 ```
 src/
-  main.ts              # bootstrap: /api prefix, validation, CORS, Swagger
+  main.ts              # bootstrap: /api prefix, CORS, Swagger
   app.module.ts        # config + MongoDB connection + feature modules
   common/
     decorators/        # @CurrentUser() etc.
+    validation/        # validateDto() — explicit, in-service validation
   auth/                # register/login, JWT strategy + guard, DTOs
   users/               # User schema, profile endpoints
+  games/               # Game schema, hosting/discovery/roster endpoints
 ```
 
 **Auth flow**
@@ -33,8 +36,10 @@ src/
 - Protected routes use a Passport **JWT strategy** + `JwtAuthGuard`. The strategy
   loads the user from the token's `sub` claim and rejects **soft-deleted** or
   **suspended** accounts, so a still-valid token can't outlive access.
-- Requests are validated against DTOs by a global `ValidationPipe`
-  (`class-validator`).
+- There is **no** global `ValidationPipe`. Each service validates its own
+  payload explicitly via the `validateDto` helper
+  (`common/validation/validate-dto.ts`), which runs the DTO's `class-validator`
+  decorators and rejects unknown properties.
 
 ## User model
 
@@ -50,10 +55,34 @@ src/
 | `reputation_reports` | number | trash-talk/dirty-play reports; suspend-at-10 logic *(deferred)* |
 | `account_status` | enum | `pending` \| `active` \| `suspended` (single source of truth for suspension; `pending` = school email unverified) |
 | `preferred_positions` | Map<string,string> | preferred position per sport, one each (e.g. `{ soccer: 'GK' }`); positions are free text |
-| `games_created` | ObjectId[] | refs to `Game` *(wired with Game schema later)* |
-| `games_joined` | ObjectId[] | refs to `Game` *(wired with Game schema later)* |
+| `games_created` | ObjectId[] | refs to `Game` this user hosts |
+| `games_joined` | ObjectId[] | refs to `Game` this user has joined |
 | `deleted_at` | Date \| null | soft-delete marker |
 | `createdAt` / `updatedAt` | Date | timestamps |
+
+## Game model
+
+| Field | Type | Notes |
+|---|---|---|
+| `host` | ObjectId | ref to `User`; auto-added to `participants` on creation |
+| `sport` | string | required |
+| `description` | string | optional |
+| `location` | string | required (human-readable place) |
+| `start_time` | Date | required; must be in the future at creation |
+| `latitude` / `longitude` | number | stored now; radius/"nearby" search *(deferred)* |
+| `min_players` | number | active roster hitting this flips status to `confirmed` |
+| `max_players` | number | active roster hitting this flips status to `locked` |
+| `status` | enum | `open` \| `confirmed` \| `locked` \| `completed` \| `cancelled` (`completed`/`cancelled` are terminal) |
+| `participants` | Participant[] | inline roster of `{ user, status: 'joined' \| 'cancelled', joined_at }` |
+| `photo_url` | string | optional |
+| `createdAt` / `updatedAt` | Date | timestamps |
+
+**Lifecycle.** The host auto-joins as the first participant. Status is recomputed
+from the count of `joined` participants after every join/leave: `open →
+confirmed` at `min_players`, `→ locked` at `max_players`. Leaving marks the
+participant `cancelled` (roster history is kept) rather than removing them. Only
+the host may edit, cancel, or complete a game; the acting user always comes from
+the JWT, never the request body.
 
 ## Endpoints
 
@@ -67,6 +96,14 @@ All routes are prefixed with `/api`.
 | PATCH | `/users/me` | JWT | Update `first_name` / `last_name` / `username` / `preferred_positions` |
 | DELETE | `/users/me` | JWT | Soft-delete own account (record retained, login blocked) |
 | GET | `/users/:id` | JWT | Another player's **public** profile (no email/password) |
+| POST | `/games` | JWT | Host a game (host auto-joins the roster) |
+| GET | `/games` | JWT | Discover games; filter by `sport`, `status`, `upcoming` |
+| GET | `/games/:id` | JWT | A single game |
+| PATCH | `/games/:id` | JWT | Edit a game (**host only**) |
+| POST | `/games/:id/join` | JWT | Join a game's roster |
+| POST | `/games/:id/leave` | JWT | Leave a game's roster (host must cancel instead) |
+| POST | `/games/:id/cancel` | JWT | Cancel a game (**host only**, terminal) |
+| POST | `/games/:id/complete` | JWT | Mark a game completed (**host only**, terminal) |
 
 Interactive, testable docs (with a Bearer-token "Authorize" button) are served
 by **Swagger** at **`/api/docs`**.
@@ -102,6 +139,8 @@ The `models/` directory holds legacy **Express/Mongoose** schemas from earlier
 work (Game, Rating, Report, Notification, DeviceToken, GameFollow,
 EmailVerificationCode). They are **not** used by the NestJS app and are kept only
 as reference for porting those features into NestJS `@Schema` classes later.
+`Game` has since been ported to `src/games/schemas/game.schema.ts` (same fields
+and collection); the rest remain reference only.
 
 > Note: the legacy `User` model there included a skill-rating system and a
 > boolean `account_status`. This service intentionally diverges — **no skill

@@ -9,8 +9,9 @@
  * own payloads explicitly (see `common/validation/validate-dto.ts`).
  */
 import { NestFactory } from '@nestjs/core';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { buildSwaggerConfig } from './swagger.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -22,14 +23,10 @@ async function bootstrap() {
   app.enableCors();
 
   // Swagger / OpenAPI docs served at `/api/docs`. `addBearerAuth` lets the UI
-  // attach a JWT so protected endpoints can be exercised from the browser.
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('SquadUp API')
-    .setDescription('Authentication and user endpoints for the SquadUp sports social app.')
-    .setVersion('0.1.0')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  // attach a JWT so protected endpoints can be exercised from the browser. The
+  // committed `docs/swagger.yaml` is generated from this same config via
+  // `npm run swagger:generate`.
+  const document = SwaggerModule.createDocument(app, buildSwaggerConfig());
   SwaggerModule.setup('api/docs', app, document);
 
   const port = process.env.PORT || 5000;
