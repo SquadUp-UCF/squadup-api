@@ -22,6 +22,7 @@ describe('UsersService', () => {
     findOne: jest.Mock;
     findById: jest.Mock;
     findOneAndUpdate: jest.Mock;
+    updateOne: jest.Mock;
     create: jest.Mock;
   };
 
@@ -30,6 +31,7 @@ describe('UsersService', () => {
       findOne: jest.fn(),
       findById: jest.fn(),
       findOneAndUpdate: jest.fn(),
+      updateOne: jest.fn(),
       create: jest.fn(),
     };
 
@@ -134,6 +136,35 @@ describe('UsersService', () => {
       model.findOneAndUpdate.mockReturnValue(queryStub(null));
       await expect(service.softDelete('user-id')).rejects.toBeInstanceOf(
         NotFoundException,
+      );
+    });
+  });
+
+  describe('game membership helpers', () => {
+    it('adds a hosted game with $addToSet', async () => {
+      model.updateOne.mockReturnValue(queryStub({ modifiedCount: 1 }));
+      await service.addCreatedGame('user-id', 'game-id');
+      expect(model.updateOne).toHaveBeenCalledWith(
+        { _id: 'user-id' },
+        { $addToSet: { games_created: 'game-id' } },
+      );
+    });
+
+    it('adds a joined game with $addToSet', async () => {
+      model.updateOne.mockReturnValue(queryStub({ modifiedCount: 1 }));
+      await service.addJoinedGame('user-id', 'game-id');
+      expect(model.updateOne).toHaveBeenCalledWith(
+        { _id: 'user-id' },
+        { $addToSet: { games_joined: 'game-id' } },
+      );
+    });
+
+    it('removes a joined game with $pull', async () => {
+      model.updateOne.mockReturnValue(queryStub({ modifiedCount: 1 }));
+      await service.removeJoinedGame('user-id', 'game-id');
+      expect(model.updateOne).toHaveBeenCalledWith(
+        { _id: 'user-id' },
+        { $pull: { games_joined: 'game-id' } },
       );
     });
   });

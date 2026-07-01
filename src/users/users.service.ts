@@ -119,6 +119,27 @@ export class UsersService {
     }
   }
 
+  /** Record that a user hosted a game (idempotent via `$addToSet`). */
+  async addCreatedGame(userId: string, gameId: string): Promise<void> {
+    await this.userModel
+      .updateOne({ _id: userId }, { $addToSet: { games_created: gameId } })
+      .exec();
+  }
+
+  /** Record that a user joined a game (idempotent via `$addToSet`). */
+  async addJoinedGame(userId: string, gameId: string): Promise<void> {
+    await this.userModel
+      .updateOne({ _id: userId }, { $addToSet: { games_joined: gameId } })
+      .exec();
+  }
+
+  /** Remove a game from a user's joined list when they leave. */
+  async removeJoinedGame(userId: string, gameId: string): Promise<void> {
+    await this.userModel
+      .updateOne({ _id: userId }, { $pull: { games_joined: gameId } })
+      .exec();
+  }
+
   /** Fetch the public view of an active user, or 404 if missing/deleted. */
   async getPublicProfile(id: string): Promise<PublicProfile> {
     const user = await this.findActiveById(id);
