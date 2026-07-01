@@ -1,3 +1,9 @@
 node_modules/
+dist/
 .env
 *.log
+.DS_Store
+# Local database dumps (may contain real PII — never commit)
+prod-dump/
+*.bson
+*.dump
