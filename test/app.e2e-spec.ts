@@ -139,4 +139,11 @@ describe('SquadUp API (e2e)', () => {
     ).length;
     expect(activeCount).toBe(2);
   });
+
+  it('exposes Prometheus metrics including the breach-check counter', async () => {
+    const res = await request(server()).get('/api/metrics').expect(200);
+    expect(res.text).toContain('squadup_pwned_password_checks_total');
+    // e2e runs with PWNED_PASSWORD_CHECK=false, so registers record "disabled".
+    expect(res.text).toMatch(/outcome="disabled"/);
+  });
 });

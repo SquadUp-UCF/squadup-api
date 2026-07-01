@@ -19,6 +19,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
+import { MetricsService } from '../metrics/metrics.service';
 
 const HIBP_RANGE_URL = 'https://api.pwnedpasswords.com/range';
 
@@ -27,7 +28,10 @@ export class PwnedPasswordService {
   private readonly logger = new Logger(PwnedPasswordService.name);
   private readonly enabled: boolean;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly metrics: MetricsService,
+  ) {
     // Enabled by default; only `false` disables it.
     this.enabled = this.config.get<string>('PWNED_PASSWORD_CHECK') !== 'false';
   }
@@ -35,6 +39,7 @@ export class PwnedPasswordService {
   /** True if the password appears in a known breach corpus. */
   async isPwned(password: string): Promise<boolean> {
     if (!this.enabled) {
+      this.metrics.recordPwnedPasswordCheck('disabled');
       return false;
     }
 
@@ -57,19 +62,24 @@ export class PwnedPasswordService {
         this.logger.warn(
           `Pwned Passwords API returned ${response.status}; allowing password (fail-open).`,
         );
+        this.metrics.recordPwnedPasswordCheck('failed_open');
         return false;
       }
 
       const body = await response.text();
-      return body.split('\n').some((line) => {
+      const breached = body.split('\n').some((line) => {
         const [hashSuffix, count] = line.trim().split(':');
         // Ignore padding entries, which carry a count of 0.
         return hashSuffix === suffix && Number(count) > 0;
       });
+
+      this.metrics.recordPwnedPasswordCheck(breached ? 'breached' : 'clean');
+      return breached;
     } catch (error) {
       this.logger.warn(
         `Pwned Passwords API unreachable; allowing password (fail-open): ${String(error)}`,
       );
+      this.metrics.recordPwnedPasswordCheck('failed_open');
       return false;
     }
   }

@@ -114,9 +114,34 @@ All routes are prefixed with `/api`.
 | POST | `/games/:id/leave` | JWT | Leave a game's roster (host must cancel instead) |
 | POST | `/games/:id/cancel` | JWT | Cancel a game (**host only**, terminal) |
 | POST | `/games/:id/complete` | JWT | Mark a game completed (**host only**, terminal) |
+| GET | `/metrics` | — | Prometheus metrics exposition (see **Observability**) |
 
 Interactive, testable docs (with a Bearer-token "Authorize" button) are served
 by **Swagger** at **`/api/docs`**.
+
+## Rate limiting
+
+All routes are rate limited per client IP via `@nestjs/throttler`:
+
+- **Global:** 60 requests/minute.
+- **Auth (`/auth/*`):** 10 requests/minute — tighter, since login/register are
+  the prime targets for brute force, enumeration, and signup spam.
+- `/metrics` is exempt so scraping is never throttled.
+
+The limiter uses an **in-memory** store, which is correct for a single process.
+If the API is ever run clustered (e.g. pm2 cluster mode) or across multiple
+hosts, switch to a shared store (e.g. Redis) so limits are enforced consistently.
+
+## Observability
+
+Prometheus metrics are exposed at **`GET /api/metrics`**. The first metric
+instruments the breach check, whose fail-open design means an outage silently
+lets passwords through — this makes that visible:
+
+- `squadup_pwned_password_checks_total{outcome="clean|breached|failed_open|disabled"}`
+
+Alert on a rising `failed_open` rate to catch when the check has stopped
+protecting registration.
 
 ## Setup
 
