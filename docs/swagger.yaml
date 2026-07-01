@@ -147,6 +147,36 @@ paths:
           description: Matching games.
       tags: *ref_3
       security: *ref_4
+  /api/games/mine:
+    get:
+      operationId: GamesController_findMine
+      summary: Games the caller hosts or plays in
+      parameters:
+        - name: role
+          required: false
+          in: query
+          description: 'Only games you host or only games you play in. Default: both.'
+          schema:
+            enum:
+              - hosting
+              - playing
+            type: string
+        - name: status
+          required: false
+          in: query
+          schema:
+            enum:
+              - open
+              - confirmed
+              - locked
+              - completed
+              - cancelled
+            type: string
+      responses:
+        '200':
+          description: The caller's games.
+      tags: *ref_3
+      security: *ref_4
   /api/games/{id}:
     get:
       operationId: GamesController_findOne

@@ -22,6 +22,7 @@ import { Game, GameDocument, GameStatus, ParticipantStatus } from './schemas/gam
 import { CreateGameDto } from './dto/create-game.dto';
 import { UpdateGameDto } from './dto/update-game.dto';
 import { ListGamesDto } from './dto/list-games.dto';
+import { MyGamesDto, MyGamesRole } from './dto/my-games.dto';
 import { validateDto } from '../common/validation/validate-dto';
 import { UsersService } from '../users/users.service';
 
@@ -73,6 +74,33 @@ export class GamesService {
     // Default to future games unless the caller explicitly opts out.
     if (filters.upcoming !== false) {
       query.start_time = { $gt: new Date() };
+    }
+    return this.gameModel.find(query).sort({ start_time: 1 }).exec();
+  }
+
+  /**
+   * Games the user is involved in — hosting and/or actively playing. Queries the
+   * Game collection directly (not the denormalized User arrays) so results
+   * always reflect the current roster. Returns a single flat list; each game
+   * carries `host` and `participants` so the client can tell them apart.
+   */
+  findForUser(userId: string, filters: MyGamesDto): Promise<GameDocument[]> {
+    const hosting = { host: userId };
+    const playing = {
+      participants: {
+        $elemMatch: { user: userId, status: ParticipantStatus.Joined },
+      },
+    };
+
+    const query: Record<string, unknown> =
+      filters.role === MyGamesRole.Hosting
+        ? { ...hosting }
+        : filters.role === MyGamesRole.Playing
+          ? { ...playing }
+          : { $or: [hosting, playing] };
+
+    if (filters.status) {
+      query.status = filters.status;
     }
     return this.gameModel.find(query).sort({ start_time: 1 }).exec();
   }

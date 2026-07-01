@@ -33,6 +33,7 @@ import { GamesService } from './games.service';
 import { CreateGameDto } from './dto/create-game.dto';
 import { UpdateGameDto } from './dto/update-game.dto';
 import { ListGamesDto } from './dto/list-games.dto';
+import { MyGamesDto } from './dto/my-games.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UserDocument } from '../users/schemas/user.schema';
@@ -57,6 +58,14 @@ export class GamesController {
   @ApiResponse({ status: 200, description: 'Matching games.' })
   findMany(@Query() query: ListGamesDto) {
     return this.gamesService.findMany(query);
+  }
+
+  // Declared before `:id` so "mine" isn't captured as a game id.
+  @Get('mine')
+  @ApiOperation({ summary: "Games the caller hosts or plays in" })
+  @ApiResponse({ status: 200, description: "The caller's games." })
+  findMine(@CurrentUser() user: UserDocument, @Query() query: MyGamesDto) {
+    return this.gamesService.findForUser(user.id, query);
   }
 
   @Get(':id')

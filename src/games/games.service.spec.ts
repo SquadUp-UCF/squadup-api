@@ -3,6 +3,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { GamesService } from './games.service';
 import { Game, GameStatus, ParticipantStatus } from './schemas/game.schema';
+import { MyGamesRole } from './dto/my-games.dto';
 import { UsersService } from '../users/users.service';
 
 /** Query stub whose `.exec()` resolves to `result`; `.sort()` chains. */
@@ -129,6 +130,46 @@ describe('GamesService', () => {
       await service.findMany({ upcoming: false });
 
       expect(model.find).toHaveBeenCalledWith({});
+    });
+  });
+
+  describe('findForUser', () => {
+    const hosting = { host: 'me' };
+    const playing = {
+      participants: {
+        $elemMatch: { user: 'me', status: ParticipantStatus.Joined },
+      },
+    };
+
+    it('defaults to games the user hosts or actively plays in', async () => {
+      const stub = queryStub([]);
+      model.find.mockReturnValue(stub);
+
+      await service.findForUser('me', {});
+
+      expect(model.find).toHaveBeenCalledWith({ $or: [hosting, playing] });
+      expect(stub.sort).toHaveBeenCalledWith({ start_time: 1 });
+    });
+
+    it('narrows to hosted games when role=hosting', async () => {
+      model.find.mockReturnValue(queryStub([]));
+      await service.findForUser('me', { role: MyGamesRole.Hosting });
+      expect(model.find).toHaveBeenCalledWith(hosting);
+    });
+
+    it('narrows to played games when role=playing', async () => {
+      model.find.mockReturnValue(queryStub([]));
+      await service.findForUser('me', { role: MyGamesRole.Playing });
+      expect(model.find).toHaveBeenCalledWith(playing);
+    });
+
+    it('applies a status filter alongside involvement', async () => {
+      model.find.mockReturnValue(queryStub([]));
+      await service.findForUser('me', { status: GameStatus.Completed });
+      expect(model.find).toHaveBeenCalledWith({
+        $or: [hosting, playing],
+        status: GameStatus.Completed,
+      });
     });
   });
 
