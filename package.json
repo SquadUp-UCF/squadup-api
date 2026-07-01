@@ -11,7 +11,9 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "swagger:generate": "ts-node scripts/generate-swagger.ts"
+    "swagger:generate": "ts-node scripts/generate-swagger.ts",
+    "db:anonymize": "ts-node scripts/anonymize-db.ts",
+    "db:clone-prod": "bash scripts/clone-prod.sh"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.4",

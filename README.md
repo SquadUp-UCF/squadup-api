@@ -162,6 +162,29 @@ docker compose down -v        # stop and wipe the data volume
 Using a distinct database name (e.g. `squadup_dev`) keeps manual testing data
 isolated from anything else in that Mongo instance.
 
+### Seeding from production (anonymized)
+
+To test against data that mirrors production's shape and volume — **without**
+copying real user PII onto local machines — clone prod as an *anonymized* copy:
+
+```bash
+brew install mongodb-database-tools   # provides mongodump / mongorestore
+docker compose up -d                  # local Mongo must be running
+
+PROD_MONGO_URI="mongodb+srv://USER:PASS@cluster.mongodb.net/squadup" \
+  npm run db:clone-prod
+```
+
+This dumps prod (read-only), restores it into the local `squadup_dev` database,
+then runs `npm run db:anonymize` to rewrite every user's name/username/email to
+fake values and replace the password hash with a single known dev password
+(`Passw0rd!`), so you can log in as any cloned user. The raw dump is deleted
+afterwards. Non-user fields (games, statuses, relationships) are preserved.
+
+**Safety:** the anonymizer refuses to run against anything that isn't
+localhost/127.0.0.1, and `mongodump` is read-only — but always double-check that
+`PROD_MONGO_URI` is used only for the dump and never as a restore target.
+
 ## Testing
 
 ```bash
