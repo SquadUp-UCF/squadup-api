@@ -316,8 +316,12 @@ components:
           example: alex@school.edu
         password:
           type: string
-          example: password123
+          example: Passw0rd!
           minLength: 8
+          maxLength: 20
+          description: >-
+            Password: 8–20 characters, with at least one uppercase letter, one
+            lowercase letter, one number, and one symbol.
       required:
         - first_name
         - last_name

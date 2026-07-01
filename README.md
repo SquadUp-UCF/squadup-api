@@ -31,6 +31,9 @@ src/
 
 - Passwords are hashed with **Argon2id** (`argon2`) at registration and verified
   at login.
+- **Password policy** (enforced on `POST /auth/register`): **8–20 characters**,
+  with at least **one uppercase letter, one lowercase letter, one number, and one
+  symbol** (any non-alphanumeric character).
 - A successful register/login returns a **JWT** (`@nestjs/jwt`) signed with
   `JWT_SECRET`.
 - Protected routes use a Passport **JWT strategy** + `JwtAuthGuard`. The strategy

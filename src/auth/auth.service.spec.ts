@@ -35,7 +35,7 @@ describe('AuthService', () => {
     last_name: 'Rivera',
     username: 'alex_r',
     email: 'alex@school.edu',
-    password: 'password123',
+    password: 'Passw0rd!',
   };
 
   describe('register', () => {
@@ -73,6 +73,36 @@ describe('AuthService', () => {
         service.register({ ...registerDto, is_admin: true } as never),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(usersService.create).not.toHaveBeenCalled();
+    });
+
+    // Policy: 8–20 chars, >=1 uppercase, >=1 lowercase, >=1 number, >=1 symbol.
+    it.each([
+      ['too short', 'Ab1!xy'],
+      ['too long', 'Abcdefg1!Abcdefg1!ABC'],
+      ['no uppercase', 'passw0rd!'],
+      ['no lowercase', 'PASSW0RD!'],
+      ['no number', 'Password!'],
+      ['no symbol', 'Password1'],
+    ])(
+      'rejects a password that is %s with 400 before hashing or persisting',
+      async (_label, password) => {
+        await expect(
+          service.register({ ...registerDto, password }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(usersService.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('accepts a policy-compliant password', async () => {
+      usersService.create.mockResolvedValue({
+        id: 'user-id',
+        first_name: 'Alex',
+        last_name: 'Rivera',
+        username: 'alex_r',
+      });
+      await expect(
+        service.register({ ...registerDto, password: 'Str0ng#Pass' }),
+      ).resolves.toHaveProperty('token');
     });
   });
 
