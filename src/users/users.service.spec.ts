@@ -140,6 +140,21 @@ describe('UsersService', () => {
     });
   });
 
+  describe('activatePendingByEmail', () => {
+    it('only promotes pending, non-deleted accounts, so it cannot lift a suspension', async () => {
+      model.updateOne.mockReturnValue(queryStub({ modifiedCount: 1 }));
+      await service.activatePendingByEmail('alex@ucf.edu');
+      expect(model.updateOne).toHaveBeenCalledWith(
+        {
+          email: 'alex@ucf.edu',
+          account_status: AccountStatus.Pending,
+          deleted_at: null,
+        },
+        { account_status: AccountStatus.Active },
+      );
+    });
+  });
+
   describe('game membership helpers', () => {
     it('adds a hosted game with $addToSet', async () => {
       model.updateOne.mockReturnValue(queryStub({ modifiedCount: 1 }));
