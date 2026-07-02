@@ -1,8 +1,10 @@
 /**
  * Authentication endpoints.
  *
- *   POST /api/auth/register — create an account and receive a token
- *   POST /api/auth/login    — exchange credentials for a token
+ *   POST /api/auth/register    — create an account and receive a token
+ *   POST /api/auth/login       — exchange credentials for a token
+ *   POST /api/auth/send-code   — email a UCF verification code
+ *   POST /api/auth/verify-code — redeem the code and activate the account
  */
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -10,6 +12,8 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { SendCodeDto } from './dto/send-code.dto';
+import { VerifyCodeDto } from './dto/verify-code.dto';
 
 // Credential endpoints are prime abuse targets (brute force, enumeration,
 // signup spam), so cap them tighter than the global default: 10/min per IP.
@@ -31,9 +35,28 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Log in with email and password' })
   @ApiResponse({ status: 200, description: 'Returns token + user.' })
-  @ApiResponse({ status: 401, description: 'Invalid credentials.' })
+  @ApiResponse({ status: 401, description: 'Invalid credentials or unverified email.' })
   @ApiResponse({ status: 403, description: 'Account suspended.' })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  @Post('send-code')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Send a UCF email verification code' })
+  @ApiResponse({ status: 200, description: 'Verification code sent.' })
+  @ApiResponse({ status: 400, description: 'Invalid UCF email.' })
+  @ApiResponse({ status: 429, description: 'Requested again within the cooldown.' })
+  sendVerificationCode(@Body() dto: SendCodeDto) {
+    return this.authService.sendVerificationCode(dto);
+  }
+
+  @Post('verify-code')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify the UCF email code' })
+  @ApiResponse({ status: 200, description: 'Email verified; account activated.' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired code.' })
+  verifyCode(@Body() dto: VerifyCodeDto) {
+    return this.authService.verifyCode(dto);
   }
 }

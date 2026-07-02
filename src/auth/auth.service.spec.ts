@@ -2,26 +2,52 @@ import { Test } from '@nestjs/testing';
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import { getModelToken } from '@nestjs/mongoose';
 import * as argon2 from 'argon2';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { PwnedPasswordService } from './pwned-password.service';
 import { AccountStatus } from '../users/schemas/user.schema';
+import { EmailVerification } from './schemas/email-verification.schema';
 
 describe('AuthService', () => {
   let service: AuthService;
-  let usersService: { create: jest.Mock; findByEmail: jest.Mock };
+  let usersService: {
+    create: jest.Mock;
+    findByEmail: jest.Mock;
+    activatePendingByEmail: jest.Mock;
+  };
   let jwtService: { sign: jest.Mock };
   let pwnedPasswordService: { isPwned: jest.Mock };
+  let emailVerificationModel: {
+    findOne: jest.Mock;
+    updateMany: jest.Mock;
+    create: jest.Mock;
+  };
+  let resend: { emails: { send: jest.Mock } };
+  let configService: { get: jest.Mock };
 
   beforeEach(async () => {
-    usersService = { create: jest.fn(), findByEmail: jest.fn() };
+    usersService = {
+      create: jest.fn(),
+      findByEmail: jest.fn(),
+      activatePendingByEmail: jest.fn(),
+    };
     jwtService = { sign: jest.fn().mockReturnValue('signed.jwt.token') };
     // Default: password is not breached; individual tests override as needed.
     pwnedPasswordService = { isPwned: jest.fn().mockResolvedValue(false) };
+    emailVerificationModel = {
+      findOne: jest.fn().mockResolvedValue(null),
+      updateMany: jest.fn().mockResolvedValue({}),
+      create: jest.fn().mockResolvedValue({}),
+    };
+    resend = { emails: { send: jest.fn().mockResolvedValue({}) } };
+    configService = { get: jest.fn().mockReturnValue(undefined) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -29,6 +55,12 @@ describe('AuthService', () => {
         { provide: UsersService, useValue: usersService },
         { provide: JwtService, useValue: jwtService },
         { provide: PwnedPasswordService, useValue: pwnedPasswordService },
+        { provide: ConfigService, useValue: configService },
+        {
+          provide: getModelToken(EmailVerification.name),
+          useValue: emailVerificationModel,
+        },
+        { provide: 'RESEND', useValue: resend },
       ],
     }).compile();
 
@@ -205,6 +237,138 @@ describe('AuthService', () => {
       await expect(service.login(loginDto)).rejects.toBeInstanceOf(
         ForbiddenException,
       );
+    });
+
+    it('rejects a pending (unverified) account with 401', async () => {
+      usersService.findByEmail.mockResolvedValue(
+        await buildUser({ account_status: AccountStatus.Pending }),
+      );
+      await expect(service.login(loginDto)).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+    });
+  });
+
+  describe('sendVerificationCode', () => {
+    const email = 'alex@ucf.edu';
+
+    it.each(['alex@gmail.com', 'not-an-email', ''])(
+      'rejects an invalid or non-UCF email (%s) with 400 without sending',
+      async (badEmail) => {
+        await expect(
+          service.sendVerificationCode({ email: badEmail }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(emailVerificationModel.create).not.toHaveBeenCalled();
+        expect(resend.emails.send).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects with 429 during the per-email cooldown without sending', async () => {
+      // A code for this email was created moments ago.
+      emailVerificationModel.findOne.mockResolvedValue({ id: 'recent' });
+
+      await expect(service.sendVerificationCode({ email })).rejects.toThrow(
+        HttpException,
+      );
+      await expect(
+        service.sendVerificationCode({ email }),
+      ).rejects.toMatchObject({ status: 429 });
+      expect(emailVerificationModel.create).not.toHaveBeenCalled();
+      expect(resend.emails.send).not.toHaveBeenCalled();
+    });
+
+    it('invalidates older codes and stores only an Argon2id hash of the new one', async () => {
+      await service.sendVerificationCode({ email });
+
+      expect(emailVerificationModel.updateMany).toHaveBeenCalledWith(
+        { email, used: false },
+        { used: true },
+      );
+
+      const stored = emailVerificationModel.create.mock.calls[0][0];
+      expect(stored.email).toBe(email);
+      expect(stored.code_hash.startsWith('$argon2id$')).toBe(true);
+      expect(stored.expires_at.getTime()).toBeGreaterThan(Date.now());
+
+      // The emailed code must be 6 digits and match the stored hash.
+      const html: string = resend.emails.send.mock.calls[0][0].html;
+      const code = html.match(/\d{6}/)?.[0];
+      expect(code).toBeDefined();
+      expect(await argon2.verify(stored.code_hash, code!)).toBe(true);
+    });
+
+    it('normalizes the email to lowercase before storing and sending', async () => {
+      await service.sendVerificationCode({ email: 'Alex@UCF.EDU' });
+
+      expect(emailVerificationModel.create.mock.calls[0][0].email).toBe(email);
+      expect(resend.emails.send.mock.calls[0][0].to).toBe(email);
+    });
+  });
+
+  describe('verifyCode', () => {
+    const email = 'alex@ucf.edu';
+    const code = '123456';
+
+    const buildRecord = async (overrides = {}) => ({
+      email,
+      code_hash: await argon2.hash(code, { type: argon2.argon2id }),
+      used: false,
+      attempts: 0,
+      save: jest.fn(),
+      ...overrides,
+    });
+
+    it('rejects a malformed code with 400 before touching the DB', async () => {
+      await expect(
+        service.verifyCode({ email, code: 'abcdef' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(emailVerificationModel.findOne).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 400 when there is no active code for the email', async () => {
+      emailVerificationModel.findOne.mockResolvedValue(null);
+      await expect(service.verifyCode({ email, code })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(usersService.activatePendingByEmail).not.toHaveBeenCalled();
+    });
+
+    it('counts a wrong guess without activating the account', async () => {
+      const record = await buildRecord();
+      emailVerificationModel.findOne.mockResolvedValue(record);
+
+      await expect(
+        service.verifyCode({ email, code: '000000' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(record.attempts).toBe(1);
+      expect(record.used).toBe(false);
+      expect(record.save).toHaveBeenCalled();
+      expect(usersService.activatePendingByEmail).not.toHaveBeenCalled();
+    });
+
+    it('invalidates the code after too many wrong guesses', async () => {
+      const record = await buildRecord({ attempts: 4 });
+      emailVerificationModel.findOne.mockResolvedValue(record);
+
+      await expect(
+        service.verifyCode({ email, code: '000000' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(record.used).toBe(true);
+      expect(usersService.activatePendingByEmail).not.toHaveBeenCalled();
+    });
+
+    it('marks the code used and activates the pending account on success', async () => {
+      const record = await buildRecord();
+      emailVerificationModel.findOne.mockResolvedValue(record);
+
+      const result = await service.verifyCode({ email, code });
+
+      expect(record.used).toBe(true);
+      expect(record.save).toHaveBeenCalled();
+      expect(usersService.activatePendingByEmail).toHaveBeenCalledWith(email);
+      expect(result).toEqual({ message: 'Email verified successfully.' });
     });
   });
 });

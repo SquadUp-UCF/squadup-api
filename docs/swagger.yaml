@@ -43,9 +43,45 @@ paths:
         '200':
           description: Returns token + user.
         '401':
-          description: Invalid credentials.
+          description: Invalid credentials or unverified email.
         '403':
           description: Account suspended.
+      tags: *ref_0
+  /api/auth/send-code:
+    post:
+      operationId: AuthController_sendVerificationCode
+      summary: Send a UCF email verification code
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendCodeDto'
+      responses:
+        '200':
+          description: Verification code sent.
+        '400':
+          description: Invalid UCF email.
+        '429':
+          description: Requested again within the cooldown.
+      tags: *ref_0
+  /api/auth/verify-code:
+    post:
+      operationId: AuthController_verifyCode
+      summary: Verify the UCF email code
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyCodeDto'
+      responses:
+        '200':
+          description: Email verified; account activated.
+        '400':
+          description: Invalid or expired code.
       tags: *ref_0
   /api/users/me:
     get:
@@ -351,6 +387,26 @@ components:
       required:
         - email
         - password
+    SendCodeDto:
+      type: object
+      properties:
+        email:
+          type: string
+          example: ta326121@ucf.edu
+      required:
+        - email
+    VerifyCodeDto:
+      type: object
+      properties:
+        email:
+          type: string
+          example: ta326121@ucf.edu
+        code:
+          type: string
+          example: '123456'
+      required:
+        - email
+        - code
     UpdateProfileDto:
       type: object
       properties:

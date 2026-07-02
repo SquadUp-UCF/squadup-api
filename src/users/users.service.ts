@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { User, UserDocument } from './schemas/user.schema';
+import { AccountStatus, User, UserDocument } from './schemas/user.schema';
 import { validateDto } from '../common/validation/validate-dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
@@ -73,6 +73,19 @@ export class UsersService {
   /** Fetch a non-soft-deleted user by id (used by auth to validate a token). */
   findActiveById(id: string): Promise<UserDocument | null> {
     return this.userModel.findOne({ _id: id, deleted_at: null }).exec();
+  }
+
+  /**
+   * Promote a pending account to active after email verification. Deliberately
+   * a no-op for any other status so verification can never lift a suspension.
+   */
+  async activatePendingByEmail(email: string): Promise<void> {
+    await this.userModel
+      .updateOne(
+        { email, account_status: AccountStatus.Pending, deleted_at: null },
+        { account_status: AccountStatus.Active },
+      )
+      .exec();
   }
 
   /**

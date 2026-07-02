@@ -2,9 +2,10 @@
  * Passport JWT strategy.
  *
  * Extracts a Bearer token, verifies its signature against `JWT_SECRET`, then
- * loads the user named by the token's `sub` claim. Soft-deleted or suspended
- * accounts are rejected so a still-valid token cannot be used after the account
- * is disabled. The returned value is attached to `request.user`.
+ * loads the user named by the token's `sub` claim. Soft-deleted, suspended, or
+ * pending (email not yet verified) accounts are rejected so a still-valid
+ * token cannot be used before verification or after the account is disabled.
+ * The returned value is attached to `request.user`.
  */
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
@@ -35,6 +36,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const user = await this.usersService.findActiveById(payload.sub);
     if (!user) {
       throw new UnauthorizedException();
+    }
+    // Registration issues a token immediately, but it must not grant access
+    // until the email is verified.
+    if (user.account_status === AccountStatus.Pending) {
+      throw new UnauthorizedException('Please verify your email.');
     }
     if (user.account_status === AccountStatus.Suspended) {
       throw new UnauthorizedException('Account suspended');
