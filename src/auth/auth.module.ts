@@ -9,6 +9,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { PwnedPasswordService } from './pwned-password.service';
 import { EmailVerification, EmailVerificationSchema } from './schemas/email-verification.schema';
+import { ResendProvider } from './resend.provider';
 
 @Module({
   imports: [
@@ -27,6 +28,6 @@ import { EmailVerification, EmailVerificationSchema } from './schemas/email-veri
     ]),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, PwnedPasswordService],
+  providers: [AuthService, JwtStrategy, PwnedPasswordService,ResendProvider],
 })
 export class AuthModule {}

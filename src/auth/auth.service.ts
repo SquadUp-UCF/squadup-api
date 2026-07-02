@@ -4,6 +4,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -35,6 +36,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     @InjectModel(EmailVerification.name)
     private readonly emailVerificationModel: Model<EmailVerificationDocument>,
+    @Inject('RESEND') private readonly resend: Resend,
   ) {}
 
   async register(payload: RegisterDto): Promise<AuthResponse> {
@@ -62,6 +64,9 @@ export class AuthService {
     const passwordMatches = await argon2.verify(user.password, dto.password);
     if (!passwordMatches) throw new UnauthorizedException('Invalid credentials');
     if (user.deleted_at) throw new UnauthorizedException('Invalid credentials');
+    if (user.account_status === AccountStatus.Pending) {
+      throw new UnauthorizedException('Please verify your email before logging in.');
+    }
     if (user.account_status === AccountStatus.Suspended) throw new ForbiddenException('Account suspended');
     return this.buildAuthResponse(user);
   }
@@ -79,8 +84,7 @@ export class AuthService {
     const code = randomInt(100000, 1000000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await this.emailVerificationModel.create({ email: normalizedEmail, code, expiresAt });
-    const resend = new Resend(this.configService.get<string>('RESEND_API_KEY'));
-    await resend.emails.send({
+    await this.resend.emails.send({
       from: 'Squad Up <onboarding@resend.dev>',
       to: normalizedEmail,
       subject: 'Your Verification Code',
@@ -100,6 +104,7 @@ export class AuthService {
     if (!record) throw new BadRequestException('Invalid or expired code.');
     record.used = true;
     await record.save();
+    await this.usersService.activateByEmail(normalizedEmail);
     return { message: 'Email verified successfully.' };
   }
 
