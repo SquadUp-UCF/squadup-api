@@ -75,7 +75,8 @@ export class AuthService {
       { email: normalizedEmail, used: false },
       { used: true },
     );
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const { randomInt } = await import('crypto');
+    const code = randomInt(100000, 1000000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await this.emailVerificationModel.create({ email: normalizedEmail, code, expiresAt });
     const resend = new Resend(this.configService.get<string>('RESEND_API_KEY'));
