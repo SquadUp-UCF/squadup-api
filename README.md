@@ -42,11 +42,19 @@ src/
   SHA-1 hash are sent, so the password never leaves the server. The check
   **fails open** (a HIBP outage won't block signups) and can be disabled with
   `PWNED_PASSWORD_CHECK=false`.
+- **Email verification:** accounts are created as **`pending`** and must verify
+  their email before they can log in or use their token. `POST /auth/send-code`
+  emails a 6-digit code via [Resend](https://resend.com) (10-minute TTL, only
+  its **Argon2id hash** is stored, 60-second per-email resend cooldown);
+  `POST /auth/verify-code` redeems it and activates the account. A code is
+  invalidated after **5 wrong guesses**. Verification only promotes `pending`
+  accounts — it can never lift a suspension.
 - A successful register/login returns a **JWT** (`@nestjs/jwt`) signed with
   `JWT_SECRET`.
 - Protected routes use a Passport **JWT strategy** + `JwtAuthGuard`. The strategy
-  loads the user from the token's `sub` claim and rejects **soft-deleted** or
-  **suspended** accounts, so a still-valid token can't outlive access.
+  loads the user from the token's `sub` claim and rejects **pending**,
+  **soft-deleted**, or **suspended** accounts, so a token can't be used before
+  verification or outlive access.
 - There is **no** global `ValidationPipe`. Each service validates its own
   payload explicitly via the `validateDto` helper
   (`common/validation/validate-dto.ts`), which runs the DTO's `class-validator`
@@ -101,8 +109,10 @@ All routes are prefixed with `/api`.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/auth/register` | — | Create an account; returns `{ token, user }` |
-| POST | `/auth/login` | — | Log in; returns `{ token, user }` |
+| POST | `/auth/register` | — | Create an account (starts **pending**); returns `{ token, user }` — the token is unusable until the email is verified |
+| POST | `/auth/login` | — | Log in; returns `{ token, user }`. Rejects pending (unverified) accounts with `401` |
+| POST | `/auth/send-code` | — | Email a 6-digit verification code to a `@ucf.edu` address (60s per-email cooldown → `429`) |
+| POST | `/auth/verify-code` | — | Redeem a code; activates the pending account. Codes expire after 10 min or 5 wrong guesses |
 | GET | `/users/me` | JWT | Authenticated user's full profile |
 | PATCH | `/users/me` | JWT | Update `first_name` / `last_name` / `username` / `preferred_positions` |
 | DELETE | `/users/me` | JWT | Soft-delete own account (record retained, login blocked) |
@@ -166,6 +176,8 @@ protecting registration.
    | `JWT_SECRET` | Secret used to sign JWTs |
    | `JWT_EXPIRES_IN` | Token lifetime, e.g. `1d` |
    | `PORT` | HTTP port (default `5000`) |
+   | `RESEND_API_KEY` | [Resend](https://resend.com) API key used to email verification codes |
+   | `RESEND_FROM` | Optional; sender for verification emails. Defaults to Resend's sandbox address, which only delivers to the Resend account owner |
    | `PWNED_PASSWORD_CHECK` | Optional; set to `false` to disable the Have I Been Pwned breach check (default enabled) |
    | `TRUST_PROXY` | Optional; trusted proxy hops when behind a reverse proxy (set `1` in prod). Unset for local/direct runs |
 3. Run it:

@@ -1,3 +1,9 @@
+/**
+ * Auth feature module. Configures Passport + JWT (secret and expiry pulled from
+ * config), reuses UsersService for persistence, and provides the JWT strategy
+ * used by JwtAuthGuard across the app. Also owns the email-verification code
+ * collection and the Resend client used to deliver codes.
+ */
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -28,6 +34,6 @@ import { ResendProvider } from './resend.provider';
     ]),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, PwnedPasswordService,ResendProvider],
+  providers: [AuthService, JwtStrategy, PwnedPasswordService, ResendProvider],
 })
 export class AuthModule {}
