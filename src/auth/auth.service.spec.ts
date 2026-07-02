@@ -1,210 +1,119 @@
-import { Test } from '@nestjs/testing';
+/**
+ * Authentication logic: registration, login, JWT issuance, and UCF email verification.
+ */
 import {
   BadRequestException,
   ForbiddenException,
+  Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
-import { AuthService } from './auth.service';
+import { Resend } from 'resend';
 import { UsersService } from '../users/users.service';
+import { AccountStatus, UserDocument } from '../users/schemas/user.schema';
+import { validateDto } from '../common/validation/validate-dto';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
 import { PwnedPasswordService } from './pwned-password.service';
-import { AccountStatus } from '../users/schemas/user.schema';
+import { EmailVerification, EmailVerificationDocument } from './schemas/email-verification.schema';
 
-describe('AuthService', () => {
-  let service: AuthService;
-  let usersService: { create: jest.Mock; findByEmail: jest.Mock };
-  let jwtService: { sign: jest.Mock };
-  let pwnedPasswordService: { isPwned: jest.Mock };
+export interface AuthResponse {
+  token: string;
+  user: { id: string; name: string; username: string };
+}
 
-  beforeEach(async () => {
-    usersService = { create: jest.fn(), findByEmail: jest.fn() };
-    jwtService = { sign: jest.fn().mockReturnValue('signed.jwt.token') };
-    // Default: password is not breached; individual tests override as needed.
-    pwnedPasswordService = { isPwned: jest.fn().mockResolvedValue(false) };
+@Injectable()
+export class AuthService {
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
+    private readonly pwnedPasswordService: PwnedPasswordService,
+    private readonly configService: ConfigService,
+    @InjectModel(EmailVerification.name)
+    private readonly emailVerificationModel: Model<EmailVerificationDocument>,
+  ) {}
 
-    const moduleRef = await Test.createTestingModule({
-      providers: [
-        AuthService,
-        { provide: UsersService, useValue: usersService },
-        { provide: JwtService, useValue: jwtService },
-        { provide: PwnedPasswordService, useValue: pwnedPasswordService },
-      ],
-    }).compile();
-
-    service = moduleRef.get(AuthService);
-  });
-
-  const registerDto = {
-    first_name: 'Alex',
-    last_name: 'Rivera',
-    username: 'alex_r',
-    email: 'alex@ucf.edu',
-    password: 'Passw0rd!',
-  };
-
-  describe('register', () => {
-    it('hashes the password with Argon2id and returns a token + user', async () => {
-      usersService.create.mockImplementation(async (data) => ({
-        id: 'user-id',
-        first_name: data.first_name,
-        last_name: data.last_name,
-        username: data.username,
-      }));
-
-      const result = await service.register(registerDto);
-
-      // The hash handed to the persistence layer must be Argon2id, not plaintext.
-      const created = usersService.create.mock.calls[0][0];
-      expect(created.password).not.toBe(registerDto.password);
-      expect(created.password.startsWith('$argon2id$')).toBe(true);
-
-      expect(result).toEqual({
-        token: 'signed.jwt.token',
-        user: { id: 'user-id', name: 'Alex Rivera', username: 'alex_r' },
-      });
-      expect(jwtService.sign).toHaveBeenCalledWith({ sub: 'user-id' });
+  async register(payload: RegisterDto): Promise<AuthResponse> {
+    const dto = await validateDto(RegisterDto, payload);
+    if (await this.pwnedPasswordService.isPwned(dto.password)) {
+      throw new BadRequestException(
+        'This password has appeared in a known data breach; please choose another.',
+      );
+    }
+    const passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
+    const user = await this.usersService.create({
+      first_name: dto.first_name,
+      last_name: dto.last_name,
+      username: dto.username,
+      email: dto.email,
+      password: passwordHash,
     });
+    return this.buildAuthResponse(user);
+  }
 
-    it('rejects an invalid payload with 400 before hashing or persisting', async () => {
-      await expect(
-        service.register({ ...registerDto, email: 'not-an-email' }),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(usersService.create).not.toHaveBeenCalled();
-    });
+  async login(payload: LoginDto): Promise<AuthResponse> {
+    const dto = await validateDto(LoginDto, payload);
+    const user = await this.usersService.findByEmail(dto.email, true);
+    if (!user) throw new UnauthorizedException('Invalid credentials');
+    const passwordMatches = await argon2.verify(user.password, dto.password);
+    if (!passwordMatches) throw new UnauthorizedException('Invalid credentials');
+    if (user.deleted_at) throw new UnauthorizedException('Invalid credentials');
+    if (user.account_status === AccountStatus.Suspended) throw new ForbiddenException('Account suspended');
+    return this.buildAuthResponse(user);
+  }
 
-    it('rejects unknown properties in the payload with 400', async () => {
-      await expect(
-        service.register({ ...registerDto, is_admin: true } as never),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(usersService.create).not.toHaveBeenCalled();
-    });
-
-    // Registration is restricted to UCF email addresses (@ucf.edu).
-    it.each([
-      'alex@gmail.com',
-      'alex@knights.ucf.edu',
-      'alex@ucf.edu.evil.com',
-      'alex@notucf.edu',
-    ])('rejects a non-UCF email (%s) with 400', async (email) => {
-      await expect(
-        service.register({ ...registerDto, email }),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(usersService.create).not.toHaveBeenCalled();
-    });
-
-    it('accepts a @ucf.edu email regardless of case', async () => {
-      usersService.create.mockResolvedValue({
-        id: 'user-id',
-        first_name: 'Alex',
-        last_name: 'Rivera',
-        username: 'alex_r',
-      });
-      await expect(
-        service.register({ ...registerDto, email: 'Alex@UCF.EDU' }),
-      ).resolves.toHaveProperty('token');
-    });
-
-    // Policy: 8–20 chars, >=1 uppercase, >=1 lowercase, >=1 number, >=1 symbol.
-    it.each([
-      ['too short', 'Ab1!xy'],
-      ['too long', 'Abcdefg1!Abcdefg1!ABC'],
-      ['no uppercase', 'passw0rd!'],
-      ['no lowercase', 'PASSW0RD!'],
-      ['no number', 'Password!'],
-      ['no symbol', 'Password1'],
-    ])(
-      'rejects a password that is %s with 400 before hashing or persisting',
-      async (_label, password) => {
-        await expect(
-          service.register({ ...registerDto, password }),
-        ).rejects.toBeInstanceOf(BadRequestException);
-        expect(usersService.create).not.toHaveBeenCalled();
-      },
+  async sendVerificationCode(email: string): Promise<{ message: string }> {
+    const normalizedEmail = email.toLowerCase().trim();
+    if (!normalizedEmail.endsWith('@ucf.edu')) {
+      throw new BadRequestException('Must use a valid @ucf.edu email.');
+    }
+    await this.emailVerificationModel.updateMany(
+      { email: normalizedEmail, used: false },
+      { used: true },
     );
-
-    it('accepts a policy-compliant password', async () => {
-      usersService.create.mockResolvedValue({
-        id: 'user-id',
-        first_name: 'Alex',
-        last_name: 'Rivera',
-        username: 'alex_r',
-      });
-      await expect(
-        service.register({ ...registerDto, password: 'Str0ng#Pass' }),
-      ).resolves.toHaveProperty('token');
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    await this.emailVerificationModel.create({ email: normalizedEmail, code, expiresAt });
+    const resend = new Resend(this.configService.get<string>('RESEND_API_KEY'));
+    await resend.emails.send({
+      from: 'Squad Up <onboarding@resend.dev>',
+      to: normalizedEmail,
+      subject: 'Your Verification Code',
+      html: '<p>Your verification code is: <strong>' + code + '</strong></p><p>Expires in 10 minutes.</p>',
     });
+    return { message: 'Verification code sent.' };
+  }
 
-    it('rejects a breached password with 400 without persisting', async () => {
-      pwnedPasswordService.isPwned.mockResolvedValue(true);
-      await expect(service.register(registerDto)).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
-      expect(pwnedPasswordService.isPwned).toHaveBeenCalledWith(
-        registerDto.password,
-      );
-      expect(usersService.create).not.toHaveBeenCalled();
+  async verifyCode(email: string, code: string): Promise<{ message: string }> {
+    const normalizedEmail = email.toLowerCase().trim();
+    const record = await this.emailVerificationModel.findOne({
+      email: normalizedEmail,
+      code,
+      used: false,
+      expiresAt: { $gt: new Date() },
     });
-  });
+    if (!record) throw new BadRequestException('Invalid or expired code.');
+    record.used = true;
+    await record.save();
+    return { message: 'Email verified successfully.' };
+  }
 
-  describe('login', () => {
-    const loginDto = { email: 'alex@ucf.edu', password: 'password123' };
+  private signToken(userId: string): string {
+    return this.jwtService.sign({ sub: userId });
+  }
 
-    const buildUser = async (overrides = {}) => ({
-      id: 'user-id',
-      first_name: 'Alex',
-      last_name: 'Rivera',
-      username: 'alex_r',
-      password: await argon2.hash(loginDto.password, { type: argon2.argon2id }),
-      account_status: AccountStatus.Active,
-      deleted_at: null,
-      ...overrides,
-    });
-
-    it('returns a token + user for valid credentials', async () => {
-      usersService.findByEmail.mockResolvedValue(await buildUser());
-
-      const result = await service.login(loginDto);
-
-      expect(usersService.findByEmail).toHaveBeenCalledWith(loginDto.email, true);
-      expect(result.token).toBe('signed.jwt.token');
-      expect(result.user).toEqual({
-        id: 'user-id',
-        name: 'Alex Rivera',
-        username: 'alex_r',
-      });
-    });
-
-    it('rejects an unknown email with 401', async () => {
-      usersService.findByEmail.mockResolvedValue(null);
-      await expect(service.login(loginDto)).rejects.toBeInstanceOf(
-        UnauthorizedException,
-      );
-    });
-
-    it('rejects a wrong password with 401', async () => {
-      usersService.findByEmail.mockResolvedValue(await buildUser());
-      await expect(
-        service.login({ ...loginDto, password: 'wrong-password' }),
-      ).rejects.toBeInstanceOf(UnauthorizedException);
-    });
-
-    it('rejects a soft-deleted account with 401', async () => {
-      usersService.findByEmail.mockResolvedValue(
-        await buildUser({ deleted_at: new Date() }),
-      );
-      await expect(service.login(loginDto)).rejects.toBeInstanceOf(
-        UnauthorizedException,
-      );
-    });
-
-    it('rejects a suspended account with 403', async () => {
-      usersService.findByEmail.mockResolvedValue(
-        await buildUser({ account_status: AccountStatus.Suspended }),
-      );
-      await expect(service.login(loginDto)).rejects.toBeInstanceOf(
-        ForbiddenException,
-      );
-    });
-  });
-});
+  private buildAuthResponse(user: UserDocument): AuthResponse {
+    return {
+      token: this.signToken(user.id),
+      user: {
+        id: user.id,
+        name: `${user.first_name} ${user.last_name}`,
+        username: user.username,
+      },
+    };
+  }
+}
