@@ -85,7 +85,7 @@ export class AuthService {
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await this.emailVerificationModel.create({ email: normalizedEmail, code, expiresAt });
     await this.resend.emails.send({
-      from: 'Squad Up <onboarding@resend.dev>',
+      from: 'Squad Up <no-reply@mail.squad-up-ucf.net>',
       to: normalizedEmail,
       subject: 'Your Verification Code',
       html: '<p>Your verification code is: <strong>' + code + '</strong></p><p>Expires in 10 minutes.</p>',
