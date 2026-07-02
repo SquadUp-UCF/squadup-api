@@ -8,11 +8,13 @@ import { Game, GameSchema } from './schemas/game.schema';
 import { GamesService } from './games.service';
 import { GamesController } from './games.controller';
 import { UsersModule } from '../users/users.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Game.name, schema: GameSchema }]),
     UsersModule,
+    NotificationsModule,
   ],
   controllers: [GamesController],
   providers: [GamesService],

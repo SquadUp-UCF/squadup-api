@@ -14,32 +14,25 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { GamesModule } from './games/games.module';
 import { MetricsModule } from './metrics/metrics.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
-    // Make environment variables available app-wide via ConfigService.
     ConfigModule.forRoot({ isGlobal: true }),
-
-    // Connect to MongoDB using the URI from the environment.
     MongooseModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         uri: config.get<string>('MONGO_URI'),
       }),
     }),
-
-    // Global rate limiting: 60 requests/min per client IP by default. Auth
-    // routes tighten this to 10/min (see AuthController). In-memory store — fine
-    // for a single process; use a shared store if the API is ever clustered.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
-
     MetricsModule,
     AuthModule,
     UsersModule,
     GamesModule,
+    NotificationsModule,
   ],
   providers: [
-    // Apply the throttler to every route (opt out per-route with @SkipThrottle).
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
