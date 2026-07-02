@@ -2,11 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
-import * as fs from 'fs';
-import * as path from 'path';
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { Notification, NotificationDocument, NotificationType } from './schemas/notification.schema';
+import { DeviceToken, DeviceTokenDocument } from './schemas/device-token.schema';
 
 @Injectable()
 export class NotificationsService {
@@ -15,26 +14,43 @@ export class NotificationsService {
   constructor(
     @InjectModel(Notification.name)
     private readonly notificationModel: Model<NotificationDocument>,
+    @InjectModel(DeviceToken.name)
+    private readonly deviceTokenModel: Model<DeviceTokenDocument>,
     private readonly configService: ConfigService,
   ) {
     if (!getApps().length) {
-      const keyPath = this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_PATH') ?? '';
-      console.log('Firebase key path:', keyPath);
-      const serviceAccount = JSON.parse(fs.readFileSync(path.resolve(keyPath), 'utf8'));
+      const base64 = this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_BASE64') ?? '';
+      const serviceAccount = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
       initializeApp({
         credential: cert(serviceAccount),
       });
     }
   }
 
-  async send(params: {
+  async registerDeviceToken(userId: string, token: string, platform: string): Promise<void> {
+    await this.deviceTokenModel.findOneAndUpdate(
+      { userId: new Types.ObjectId(userId), token },
+      { userId: new Types.ObjectId(userId), token, platform },
+      { upsert: true, new: true },
+    ).exec();
+  }
+
+  async getDeviceTokens(userId: string): Promise<string[]> {
+    const tokens = await this.deviceTokenModel
+      .find({ userId: new Types.ObjectId(userId) })
+      .exec();
+    return tokens.map(t => t.token);
+  }
+
+  async sendToUser(params: {
     userId: string;
-    deviceToken: string;
     type: NotificationType;
     title: string;
     body: string;
     gameId?: string;
   }): Promise<void> {
+    const tokens = await this.getDeviceTokens(params.userId);
+
     await this.notificationModel.create({
       userId: new Types.ObjectId(params.userId),
       type: params.type,
@@ -43,20 +59,16 @@ export class NotificationsService {
       gameId: params.gameId ? new Types.ObjectId(params.gameId) : null,
     });
 
-    try {
-      await getMessaging().send({
-        token: params.deviceToken,
-        notification: {
-          title: params.title,
-          body: params.body,
-        },
-        data: {
-          type: params.type,
-          gameId: params.gameId ?? '',
-        },
-      });
-    } catch (err) {
-      this.logger.warn(`Push notification failed for user ${params.userId}: ${err.message}`);
+    for (const token of tokens) {
+      try {
+        await getMessaging().send({
+          token,
+          notification: { title: params.title, body: params.body },
+          data: { type: params.type, gameId: params.gameId ?? '' },
+        });
+      } catch (err) {
+        this.logger.warn(`Push failed for token ${token}: ${err.message}`);
+      }
     }
   }
 

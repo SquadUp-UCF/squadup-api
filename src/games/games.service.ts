@@ -25,6 +25,8 @@ import { ListGamesDto } from './dto/list-games.dto';
 import { MyGamesDto, MyGamesRole } from './dto/my-games.dto';
 import { validateDto } from '../common/validation/validate-dto';
 import { UsersService } from '../users/users.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/schemas/notification.schema';
 
 const TERMINAL_STATUSES: GameStatus[] = [
   GameStatus.Completed,
@@ -36,6 +38,7 @@ export class GamesService {
   constructor(
     @InjectModel(Game.name) private readonly gameModel: Model<GameDocument>,
     private readonly usersService: UsersService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -71,19 +74,12 @@ export class GamesService {
     if (filters.status) {
       query.status = filters.status;
     }
-    // Default to future games unless the caller explicitly opts out.
     if (filters.upcoming !== false) {
       query.start_time = { $gt: new Date() };
     }
     return this.gameModel.find(query).sort({ start_time: 1 }).exec();
   }
 
-  /**
-   * Games the user is involved in — hosting and/or actively playing. Queries the
-   * Game collection directly (not the denormalized User arrays) so results
-   * always reflect the current roster. Returns a single flat list; each game
-   * carries `host` and `participants` so the client can tell them apart.
-   */
   findForUser(userId: string, filters: MyGamesDto): Promise<GameDocument[]> {
     const hosting = { host: userId };
     const playing = {
@@ -105,7 +101,6 @@ export class GamesService {
     return this.gameModel.find(query).sort({ start_time: 1 }).exec();
   }
 
-  /** Fetch a game by id or throw 404. */
   async findByIdOrFail(id: string): Promise<GameDocument> {
     const game = await this.gameModel.findById(id).exec();
     if (!game) {
@@ -114,7 +109,6 @@ export class GamesService {
     return game;
   }
 
-  /** Edit a game's details (host only, non-terminal). */
   async update(
     id: string,
     userId: string,
@@ -131,12 +125,10 @@ export class GamesService {
       throw new BadRequestException('min_players cannot exceed max_players');
     }
 
-    // Thresholds may have moved; re-evaluate the roster against them.
     this.recomputeStatus(game);
     return game.save();
   }
 
-  /** Add the caller to a game's roster. */
   async join(id: string, userId: string): Promise<GameDocument> {
     const game = await this.findByIdOrFail(id);
 
@@ -157,7 +149,6 @@ export class GamesService {
       throw new BadRequestException('Already joined this game');
     }
     if (existing) {
-      // Re-joining after a previous leave: revive the roster entry.
       existing.status = ParticipantStatus.Joined;
       existing.joined_at = new Date();
     } else {
@@ -168,13 +159,53 @@ export class GamesService {
       });
     }
 
+    const prevStatus = game.status;
     this.recomputeStatus(game);
     await game.save();
     await this.usersService.addJoinedGame(userId, game.id);
-    return game;
-  }
 
-  /** Remove the caller from a game's roster. The host must cancel instead. */
+    // Notify host that someone joined
+    this.notificationsService.sendToUser({
+      userId: game.host.toString(),
+      type: NotificationType.PlayerJoined,
+      title: 'Someone joined your game!',
+      body: `A new player joined your ${game.sport} game.`,
+      gameId: game.id,
+    }).catch(() => {});
+
+    // Notify all participants if status changed
+    if (prevStatus !== game.status) {
+  const activeParticipants = game.participants
+    .filter(p => p.status === ParticipantStatus.Joined)
+    .map(p => p.user.toString());
+
+  const newStatus = game.status as GameStatus;
+
+  if (newStatus === GameStatus.Confirmed) {
+    for (const participantId of activeParticipants) {
+      this.notificationsService.sendToUser({
+        userId: participantId,
+        type: NotificationType.GameConfirmed,
+        title: 'Game confirmed!',
+        body: `Your ${game.sport} game has enough players and is confirmed.`,
+        gameId: game.id,
+      }).catch(() => {});
+    }
+  } else if (newStatus === GameStatus.Locked) {
+    for (const participantId of activeParticipants) {
+      this.notificationsService.sendToUser({
+        userId: participantId,
+        type: NotificationType.GameLocked,
+        title: 'Game is full!',
+        body: `Your ${game.sport} game is now full.`,
+        gameId: game.id,
+      }).catch(() => {});
+    }
+  }
+}
+return game;
+}
+
   async leave(id: string, userId: string): Promise<GameDocument> {
     const game = await this.findByIdOrFail(id);
     this.assertNotTerminal(game);
@@ -201,17 +232,32 @@ export class GamesService {
     return game;
   }
 
-  /** Cancel a game (host only). Terminal. */
   async cancel(id: string, userId: string): Promise<GameDocument> {
     const game = await this.findByIdOrFail(id);
     this.assertHost(game, userId);
     this.assertNotTerminal(game);
 
     game.status = GameStatus.Cancelled;
-    return game.save();
+    await game.save();
+
+    // Notify all participants the game was cancelled
+    const activeParticipants = game.participants
+      .filter(p => p.status === ParticipantStatus.Joined && p.user.toString() !== userId)
+      .map(p => p.user.toString());
+
+    for (const participantId of activeParticipants) {
+      this.notificationsService.sendToUser({
+        userId: participantId,
+        type: NotificationType.GameCancelled,
+        title: 'Game cancelled',
+        body: `The ${game.sport} game you joined has been cancelled.`,
+        gameId: game.id,
+      }).catch(() => {});
+    }
+
+    return game;
   }
 
-  /** Mark a game completed (host only). Terminal; keys the ratings feature. */
   async complete(id: string, userId: string): Promise<GameDocument> {
     const game = await this.findByIdOrFail(id);
     this.assertHost(game, userId);
@@ -239,10 +285,6 @@ export class GamesService {
     }
   }
 
-  /**
-   * Re-derive status from the active roster. `open → confirmed → locked` as the
-   * roster fills; leaves it untouched once terminal.
-   */
   private recomputeStatus(game: GameDocument): void {
     if (this.isTerminal(game)) {
       return;
