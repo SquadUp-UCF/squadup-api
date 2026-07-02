@@ -17,6 +17,7 @@ import {
   HttpStatus,
   Inject,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -53,6 +54,8 @@ const MAX_VERIFY_ATTEMPTS = 5;
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
@@ -157,7 +160,7 @@ export class AuthService {
       expires_at: new Date(Date.now() + CODE_TTL_MS),
     });
 
-    await this.resend.emails.send({
+    const { error } = await this.resend.emails.send({
       from:
         this.configService.get<string>('RESEND_FROM') ||
         'Squad Up <onboarding@resend.dev>',
@@ -165,6 +168,19 @@ export class AuthService {
       subject: 'Your Verification Code',
       html: `<p>Your verification code is: <strong>${code}</strong></p><p>Expires in 10 minutes.</p>`,
     });
+    if (error) {
+      // Resend reports failures in the returned `error` (it does not throw), so
+      // log the reason — otherwise a rejected send looks like success and the
+      // code never arrives. Common cause: sending from the `onboarding@resend.dev`
+      // sandbox sender, which only delivers to the Resend account owner.
+      this.logger.error(
+        `Failed to send verification code to ${email}: ${JSON.stringify(error)}`,
+      );
+      throw new HttpException(
+        'Could not send verification code. Please try again.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
 
     return { message: 'Verification code sent.' };
   }
