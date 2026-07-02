@@ -7,3 +7,4 @@ dist/
 prod-dump/
 *.bson
 *.dump
+.git 2
