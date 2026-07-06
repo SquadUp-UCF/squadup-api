@@ -14,6 +14,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -86,6 +87,15 @@ export class GamesController {
     @Body() dto: UpdateGameDto,
   ) {
     return this.gamesService.update(id, user.id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a game (host only)' })
+  @ApiResponse({ status: 204, description: 'The game was deleted.' })
+  @ApiResponse({ status: 403, description: 'Only the host can delete.' })
+  remove(@CurrentUser() user: UserDocument, @Param('id') id: string) {
+    return this.gamesService.remove(id, user.id);
   }
 
   @Post(':id/join')

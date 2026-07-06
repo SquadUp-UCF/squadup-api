@@ -153,6 +153,13 @@ export class UsersService {
       .exec();
   }
 
+  /** Remove a game from a user's created list when the host deletes it. */
+  async removeCreatedGame(userId: string, gameId: string): Promise<void> {
+    await this.userModel
+      .updateOne({ _id: userId }, { $pull: { games_created: gameId } })
+      .exec();
+  }
+
   /** Fetch the public view of an active user, or 404 if missing/deleted. */
   async getPublicProfile(id: string): Promise<PublicProfile> {
     const user = await this.findActiveById(id);
