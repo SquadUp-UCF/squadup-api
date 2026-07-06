@@ -10,6 +10,10 @@ import { DeviceToken, DeviceTokenDocument } from './schemas/device-token.schema'
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
+  // Whether Firebase Cloud Messaging is configured. When it isn't (e.g. local
+  // dev without a service-account credential) we still persist notifications to
+  // Mongo but skip the push send instead of crashing the app at boot.
+  private readonly pushEnabled: boolean;
 
   constructor(
     @InjectModel(Notification.name)
@@ -18,12 +22,27 @@ export class NotificationsService {
     private readonly deviceTokenModel: Model<DeviceTokenDocument>,
     private readonly configService: ConfigService,
   ) {
-    if (!getApps().length) {
-      const base64 = this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_BASE64') ?? '';
-      const serviceAccount = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
-      initializeApp({
-        credential: cert(serviceAccount),
-      });
+    const base64 = this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT_BASE64') ?? '';
+
+    if (!base64) {
+      this.pushEnabled = false;
+      this.logger.warn(
+        'FIREBASE_SERVICE_ACCOUNT_BASE64 not set — push notifications disabled.',
+      );
+      return;
+    }
+
+    try {
+      if (!getApps().length) {
+        const serviceAccount = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
+        initializeApp({ credential: cert(serviceAccount) });
+      }
+      this.pushEnabled = true;
+    } catch (err) {
+      this.pushEnabled = false;
+      this.logger.warn(
+        `Firebase init failed — push notifications disabled: ${(err as Error).message}`,
+      );
     }
   }
 
@@ -58,6 +77,8 @@ export class NotificationsService {
       body: params.body,
       gameId: params.gameId ? new Types.ObjectId(params.gameId) : null,
     });
+
+    if (!this.pushEnabled) return;
 
     for (const token of tokens) {
       try {

@@ -66,15 +66,19 @@ export class GamesService {
   }
 
   /** Discovery listing. Filters by sport, status, and (by default) upcoming. */
-  findMany(filters: ListGamesDto): Promise<GameDocument[]> {
+  async findMany(filters: ListGamesDto): Promise<GameDocument[]> {
+    // Validate/coerce the raw query first — this runs the DTO's @Transform so
+    // `upcoming=false` becomes the boolean false (query strings arrive as text,
+    // and there's no global ValidationPipe to transform them).
+    const dto = await validateDto(ListGamesDto, filters);
     const query: Record<string, unknown> = {};
-    if (filters.sport) {
-      query.sport = filters.sport;
+    if (dto.sport) {
+      query.sport = dto.sport;
     }
-    if (filters.status) {
-      query.status = filters.status;
+    if (dto.status) {
+      query.status = dto.status;
     }
-    if (filters.upcoming !== false) {
+    if (dto.upcoming !== false) {
       query.start_time = { $gt: new Date() };
     }
     return this.gameModel.find(query).sort({ start_time: 1 }).exec();
@@ -265,6 +269,20 @@ return game;
 
     game.status = GameStatus.Completed;
     return game.save();
+  }
+
+  /**
+   * Permanently delete a game (host only). Unlike `cancel`, which keeps the
+   * record in a terminal state, this removes the document and untracks it from
+   * the host's created list. Any joined players still notified via cancel are
+   * not messaged here — deletion is for games posted in error.
+   */
+  async remove(id: string, userId: string): Promise<void> {
+    const game = await this.findByIdOrFail(id);
+    this.assertHost(game, userId);
+
+    await this.gameModel.deleteOne({ _id: game.id }).exec();
+    await this.usersService.removeCreatedGame(userId, game.id);
   }
 
   // --- helpers -------------------------------------------------------------
