@@ -182,4 +182,14 @@ export class UsersService {
       games_joined: user.games_joined.length,
     };
   }
+
+
+  async isUsernameTaken(username: string): Promise<boolean>{
+    const existing = await this.userModel
+      .findOne({ username, deleted_at: null })
+      // optional: case-insensitive match so "UserName" ≈ "username"
+      .collation({ locale: 'en', strength: 2 })
+      .exec();
+    return !!existing;
+  }
 }

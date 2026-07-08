@@ -16,6 +16,7 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Query
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -62,6 +63,12 @@ export class UsersController {
   @ApiResponse({ status: 204, description: 'Account soft-deleted.' })
   async deleteMe(@CurrentUser() user: UserDocument): Promise<void> {
     await this.usersService.softDelete(user.id);
+  }
+
+
+  @Get('username-available')
+  async usernameAvailable(@Query('username') username: string) {
+    return { available: !(await this.usersService.isUsernameTaken(username)) };
   }
 
   @Get(':id')
