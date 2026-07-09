@@ -39,6 +39,7 @@ import {
   EmailVerification,
   EmailVerificationDocument,
 } from './schemas/email-verification.schema';
+import { buildVerificationEmail } from './templates/verification-email';
 
 export interface AuthResponse {
   token: string;
@@ -160,13 +161,21 @@ export class AuthService {
       expires_at: new Date(Date.now() + CODE_TTL_MS),
     });
 
+    const emailContent = buildVerificationEmail({
+      code,
+      expiresMinutes: CODE_TTL_MS / 60_000,
+      logoUrl:
+        this.configService.get<string>('EMAIL_LOGO_URL') ||
+        'https://squad-up-ucf.net/logo.png',
+    });
     const { error } = await this.resend.emails.send({
       from:
         this.configService.get<string>('RESEND_FROM') ||
         'Squad Up <onboarding@resend.dev>',
       to: email,
-      subject: 'Your Verification Code',
-      html: `<p>Your verification code is: <strong>${code}</strong></p><p>Expires in 10 minutes.</p>`,
+      subject: emailContent.subject,
+      html: emailContent.html,
+      text: emailContent.text,
     });
     if (error) {
       // Resend reports failures in the returned `error` (it does not throw), so
