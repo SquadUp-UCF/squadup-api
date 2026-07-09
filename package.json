@@ -13,6 +13,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed:dev": "ts-node scripts/seed-dev.ts",
     "swagger:generate": "ts-node scripts/generate-swagger.ts",
+    "banners:generate": "ts-node scripts/generate-sport-banners.ts",
+    "banners:fetch": "ts-node scripts/fetch-sport-photos.ts",
     "db:anonymize": "ts-node scripts/anonymize-db.ts",
     "db:clone-prod": "bash scripts/clone-prod.sh"
   },

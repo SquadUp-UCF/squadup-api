@@ -27,6 +27,7 @@ import { validateDto } from '../common/validation/validate-dto';
 import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/schemas/notification.schema';
+import { bannerForSport, isStockBanner } from './sport-banners';
 
 const TERMINAL_STATUSES: GameStatus[] = [
   GameStatus.Completed,
@@ -58,6 +59,9 @@ export class GamesService {
     const game = await this.gameModel.create({
       ...dto,
       host: hostId,
+      // Banner: the host's own image if they supplied one, else the sport's
+      // stock banner (a generic default for unrecognized sports).
+      photo_url: dto.photo_url?.trim() || bannerForSport(dto.sport),
       participants: [{ user: hostId, status: ParticipantStatus.Joined }],
     });
 
@@ -123,7 +127,20 @@ export class GamesService {
     this.assertHost(game, userId);
     this.assertNotTerminal(game);
 
+    const prevPhoto = game.photo_url;
     Object.assign(game, dto);
+
+    // Keep the banner in step with the sport when it's still a stock default
+    // and the host isn't setting their own image in this same edit — so
+    // switching sports doesn't leave the old sport's banner behind, but a
+    // custom picture is never clobbered.
+    if (
+      dto.sport !== undefined &&
+      dto.photo_url === undefined &&
+      isStockBanner(prevPhoto)
+    ) {
+      game.photo_url = bannerForSport(game.sport);
+    }
 
     if (game.min_players > game.max_players) {
       throw new BadRequestException('min_players cannot exceed max_players');

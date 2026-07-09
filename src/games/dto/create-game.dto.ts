@@ -56,7 +56,11 @@ export class CreateGameDto {
   @Min(1)
   max_players: number;
 
-  @ApiPropertyOptional({ example: 'https://cdn.squadup.app/games/abc.jpg' })
+  @ApiPropertyOptional({
+    example: 'https://cdn.squadup.app/games/abc.jpg',
+    description:
+      "Banner image URL. When omitted, defaults to the sport's stock banner.",
+  })
   @IsOptional()
   @IsString()
   @MaxLength(500)

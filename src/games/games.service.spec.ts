@@ -5,6 +5,7 @@ import { GamesService } from './games.service';
 import { Game, GameStatus, ParticipantStatus } from './schemas/game.schema';
 import { MyGamesRole } from './dto/my-games.dto';
 import { UsersService } from '../users/users.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /** Query stub whose `.exec()` resolves to `result`; `.sort()` chains. */
 function queryStub(result: unknown) {
@@ -54,6 +55,7 @@ describe('GamesService', () => {
     addJoinedGame: jest.Mock;
     removeJoinedGame: jest.Mock;
   };
+  let notifications: { sendToUser: jest.Mock };
 
   beforeEach(async () => {
     model = { create: jest.fn(), findById: jest.fn(), find: jest.fn() };
@@ -62,12 +64,14 @@ describe('GamesService', () => {
       addJoinedGame: jest.fn().mockResolvedValue(undefined),
       removeJoinedGame: jest.fn().mockResolvedValue(undefined),
     };
+    notifications = { sendToUser: jest.fn().mockResolvedValue(undefined) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         GamesService,
         { provide: getModelToken(Game.name), useValue: model },
         { provide: UsersService, useValue: users },
+        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
 
@@ -89,6 +93,31 @@ describe('GamesService', () => {
         }),
       );
       expect(users.addCreatedGame).toHaveBeenCalledWith('host-id', 'game-id');
+    });
+
+    it("defaults photo_url to the sport's stock banner when none is given", async () => {
+      model.create.mockResolvedValue(makeGame());
+
+      await service.create('host-id', validCreate);
+
+      expect(model.create).toHaveBeenCalledWith(
+        expect.objectContaining({ photo_url: '/sports/soccer.svg' }),
+      );
+    });
+
+    it('keeps a host-supplied banner instead of the stock one', async () => {
+      model.create.mockResolvedValue(makeGame());
+
+      await service.create('host-id', {
+        ...validCreate,
+        photo_url: 'https://cdn.squadup.app/games/abc.jpg',
+      });
+
+      expect(model.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          photo_url: 'https://cdn.squadup.app/games/abc.jpg',
+        }),
+      );
     });
 
     it('rejects min_players greater than max_players', async () => {
@@ -308,6 +337,21 @@ describe('GamesService', () => {
       await service.update('game-id', 'host-id', { location: 'New Field' });
       expect(game.location).toBe('New Field');
       expect(game.save).toHaveBeenCalled();
+    });
+
+    it('re-points a stock banner when the sport changes', async () => {
+      const game = makeGame({ photo_url: '/sports/soccer.svg' });
+      model.findById.mockReturnValue(queryStub(game));
+      await service.update('game-id', 'host-id', { sport: 'tennis' });
+      expect(game.photo_url).toBe('/sports/tennis.svg');
+    });
+
+    it('keeps a custom banner even when the sport changes', async () => {
+      const custom = 'https://cdn.squadup.app/games/abc.jpg';
+      const game = makeGame({ photo_url: custom });
+      model.findById.mockReturnValue(queryStub(game));
+      await service.update('game-id', 'host-id', { sport: 'tennis' });
+      expect(game.photo_url).toBe(custom);
     });
   });
 

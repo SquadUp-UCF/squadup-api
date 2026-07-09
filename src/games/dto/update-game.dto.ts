@@ -61,7 +61,11 @@ export class UpdateGameDto {
   @Min(1)
   max_players?: number;
 
-  @ApiPropertyOptional({ example: 'https://cdn.squadup.app/games/abc.jpg' })
+  @ApiPropertyOptional({
+    example: 'https://cdn.squadup.app/games/abc.jpg',
+    description:
+      "Banner image URL. Changing the sport re-points a stock banner at the new sport; a custom image is kept.",
+  })
   @IsOptional()
   @IsString()
   @MaxLength(500)

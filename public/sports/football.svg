@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400" role="img" aria-label="Football">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="hsl(341, 62%, 44%)"/>
+      <stop offset="1" stop-color="hsl(9, 66%, 26%)"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="400" fill="url(#bg)"/>
+  <circle cx="1010" cy="110" r="250" fill="#ffffff" opacity="0.06"/>
+  <circle cx="170" cy="380" r="190" fill="#000000" opacity="0.06"/>
+  <text x="72" y="218" font-family="'Segoe UI', system-ui, Arial, sans-serif" font-size="98" font-weight="800" fill="#ffffff">Football</text>
+  <text x="76" y="276" font-family="'Segoe UI', system-ui, Arial, sans-serif" font-size="26" font-weight="700" letter-spacing="8" fill="#ffffff" opacity="0.72">SQUAD-UP</text>
+</svg>

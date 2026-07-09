@@ -47,6 +47,13 @@ async function bootstrap() {
   // stored as `/uploads/avatars/<id>.jpg` resolves directly.
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads/' });
 
+  // Serve the committed stock sport banners from `public/sports/` at
+  // `/sports/...`, so a game's default `photo_url` (e.g. `/sports/soccer.svg`)
+  // resolves directly.
+  app.useStaticAssets(join(process.cwd(), 'public', 'sports'), {
+    prefix: '/sports/',
+  });
+
   // Swagger / OpenAPI docs served at `/api/docs`. `addBearerAuth` lets the UI
   // attach a JWT so protected endpoints can be exercised from the browser. The
   // committed `docs/swagger.yaml` is generated from this same config via

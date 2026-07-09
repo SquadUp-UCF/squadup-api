@@ -575,6 +575,9 @@ components:
         photo_url:
           type: string
           example: https://cdn.squadup.app/games/abc.jpg
+          description: >-
+            Banner image URL. When omitted, defaults to the sport's stock
+            banner.
       required:
         - sport
         - location
@@ -613,6 +616,9 @@ components:
         photo_url:
           type: string
           example: https://cdn.squadup.app/games/abc.jpg
+          description: >-
+            Banner image URL. Changing the sport re-points a stock banner at the
+            new sport; a custom image is kept.
     RegisterDeviceDto:
       type: object
       properties:

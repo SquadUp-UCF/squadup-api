@@ -10,3 +10,6 @@ prod-dump/
 .git 2
 # Uploaded user files (profile pictures, etc.) — not tracked in git
 /uploads/
+
+# Scratch dir for banner candidate review (npm run banners:fetch -- --candidates)
+/public/sports/_candidates/
