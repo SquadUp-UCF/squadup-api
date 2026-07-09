@@ -123,6 +123,56 @@ paths:
           description: Account soft-deleted.
       tags: *ref_1
       security: *ref_2
+  /api/users/me/avatar:
+    put:
+      operationId: UsersController_uploadAvatar
+      summary: Upload or replace the authenticated user's picture
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - avatar
+              properties:
+                avatar:
+                  type: string
+                  format: binary
+                  description: JPEG, PNG, or WebP image, 5 MB max.
+      responses:
+        '200':
+          description: Updated profile with picture path.
+        '400':
+          description: Missing file or unsupported type.
+        '413':
+          description: Image exceeds the 5 MB limit.
+      tags: *ref_1
+      security: *ref_2
+    delete:
+      operationId: UsersController_removeAvatar
+      summary: Remove the authenticated user's picture
+      parameters: []
+      responses:
+        '200':
+          description: Picture removed.
+      tags: *ref_1
+      security: *ref_2
+  /api/users/username-available:
+    get:
+      operationId: UsersController_usernameAvailable
+      parameters:
+        - name: username
+          required: true
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+      tags: *ref_1
+      security: *ref_2
   /api/users/{id}:
     get:
       operationId: UsersController_getPublicProfile
@@ -262,6 +312,22 @@ paths:
           description: Only the host can edit.
       tags: *ref_3
       security: *ref_4
+    delete:
+      operationId: GamesController_remove
+      summary: Delete a game (host only)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        '204':
+          description: The game was deleted.
+        '403':
+          description: Only the host can delete.
+      tags: *ref_3
+      security: *ref_4
   /api/games/{id}/join:
     post:
       operationId: GamesController_join
@@ -330,6 +396,54 @@ paths:
           description: Only the host can complete.
       tags: *ref_3
       security: *ref_4
+  /api/notifications/device-token:
+    post:
+      operationId: NotificationsController_registerDevice
+      summary: Register a device token for push notifications
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDeviceDto'
+      responses:
+        '201':
+          description: Device token registered.
+      tags: &ref_5
+        - notifications
+  /api/notifications:
+    get:
+      operationId: NotificationsController_getMyNotifications
+      summary: Get all notifications for the current user
+      parameters: []
+      responses:
+        '200':
+          description: ''
+      tags: *ref_5
+  /api/notifications/{id}/read:
+    patch:
+      operationId: NotificationsController_markRead
+      summary: Mark a notification as read
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+      tags: *ref_5
+  /api/notifications/read-all:
+    patch:
+      operationId: NotificationsController_markAllRead
+      summary: Mark all notifications as read
+      parameters: []
+      responses:
+        '200':
+          description: ''
+      tags: *ref_5
 info:
   title: SquadUp API
   description: Authentication, user, and games endpoints for the SquadUp sports social app.
@@ -499,3 +613,14 @@ components:
         photo_url:
           type: string
           example: https://cdn.squadup.app/games/abc.jpg
+    RegisterDeviceDto:
+      type: object
+      properties:
+        token:
+          type: string
+          example: fcm-device-token-here
+        platform:
+          type: string
+          example: ios
+      required:
+        - token

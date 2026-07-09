@@ -17,7 +17,7 @@ schema.
 
 ```
 src/
-  main.ts              # bootstrap: /api prefix, CORS, Swagger
+  main.ts              # bootstrap: /api prefix, CORS, static /uploads, Swagger
   app.module.ts        # config + MongoDB connection + feature modules
   common/
     decorators/        # @CurrentUser() etc.
@@ -67,6 +67,7 @@ src/
 | `first_name`, `last_name` | string | required |
 | `username` | string | required, **unique** |
 | `email` | string | required, **unique** |
+| `profile_picture` | string \| null | path to the uploaded avatar (e.g. `/uploads/avatars/<id>.jpg`), served statically; `null` when unset |
 | `password` | string | Argon2id hash, never returned (`select: false`) |
 | `reputation` | float | 0.0–5.0, starts at **5.0**; set by post-match ratings |
 | `no_show_count` | number | starts at 0 |
@@ -115,8 +116,10 @@ All routes are prefixed with `/api`.
 | POST | `/auth/verify-code` | — | Redeem a code; activates the pending account. Codes expire after 10 min or 5 wrong guesses |
 | GET | `/users/me` | JWT | Authenticated user's full profile |
 | PATCH | `/users/me` | JWT | Update `first_name` / `last_name` / `username` / `preferred_positions` |
+| PUT | `/users/me/avatar` | JWT | Upload/replace the profile picture (`multipart/form-data`, field `avatar`; JPEG/PNG/WebP, ≤5 MB). Stores the file under `/uploads/avatars/` and saves its path on the user |
+| DELETE | `/users/me/avatar` | JWT | Remove the profile picture (clears the path and deletes the file) |
 | DELETE | `/users/me` | JWT | Soft-delete own account (record retained, login blocked) |
-| GET | `/users/:id` | JWT | Another player's **public** profile (no email/password) |
+| GET | `/users/:id` | JWT | Another player's **public** profile (no email/password; includes `profile_picture`) |
 | POST | `/games` | JWT | Host a game (host auto-joins the roster) |
 | GET | `/games` | JWT | Discover games; filter by `sport`, `status`, `upcoming` |
 | GET | `/games/mine` | JWT | Games you host or actively play in; filter by `role`, `status` |

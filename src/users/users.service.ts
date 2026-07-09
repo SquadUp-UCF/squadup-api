@@ -12,9 +12,12 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { unlink } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import { AccountStatus, User, UserDocument } from './schemas/user.schema';
 import { validateDto } from '../common/validation/validate-dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { AVATAR_DIR } from './avatar-upload';
 
 /** Fields safe to expose when another player views a profile. */
 export interface PublicProfile {
@@ -22,6 +25,7 @@ export interface PublicProfile {
   first_name: string;
   last_name: string;
   username: string;
+  profile_picture: string | null;
   reputation: number;
   is_flaker: boolean;
   account_status: string;
@@ -117,6 +121,81 @@ export class UsersService {
   }
 
   /**
+   * Point a user's row at a freshly uploaded avatar (already written to disk by
+   * Multer) and remove the file it replaces. If the user is gone, the new file
+   * is cleaned up so a failed request never leaves an orphan behind.
+   */
+  async setProfilePicture(
+    id: string,
+    publicPath: string,
+  ): Promise<UserDocument> {
+    const current = await this.findActiveById(id);
+    if (!current) {
+      await this.deleteAvatarFile(publicPath);
+      throw new NotFoundException('User not found');
+    }
+
+    const previous = current.profile_picture;
+    const updated = await this.userModel
+      .findOneAndUpdate(
+        { _id: id, deleted_at: null },
+        { profile_picture: publicPath },
+        { new: true },
+      )
+      .exec();
+    if (!updated) {
+      await this.deleteAvatarFile(publicPath);
+      throw new NotFoundException('User not found');
+    }
+
+    if (previous && previous !== publicPath) {
+      await this.deleteAvatarFile(previous);
+    }
+    return updated;
+  }
+
+  /**
+   * Clear a user's avatar and delete the underlying file. A no-op removal (no
+   * picture set) simply returns the user unchanged.
+   */
+  async removeProfilePicture(id: string): Promise<UserDocument> {
+    const current = await this.findActiveById(id);
+    if (!current) {
+      throw new NotFoundException('User not found');
+    }
+
+    const previous = current.profile_picture;
+    const updated = await this.userModel
+      .findOneAndUpdate(
+        { _id: id, deleted_at: null },
+        { profile_picture: null },
+        { new: true },
+      )
+      .exec();
+    if (!updated) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (previous) {
+      await this.deleteAvatarFile(previous);
+    }
+    return updated;
+  }
+
+  /**
+   * Best-effort deletion of a stored avatar file. Only the basename is used so a
+   * stored path can never point outside the avatar directory, and a missing file
+   * is ignored — the row is the source of truth, the file just backs it.
+   */
+  private async deleteAvatarFile(publicPath: string): Promise<void> {
+    try {
+      await unlink(join(AVATAR_DIR, basename(publicPath)));
+    } catch {
+      // Already gone (manual cleanup, prior failure) — nothing to do.
+    }
+  }
+
+  /**
    * Soft-delete: stamp `deleted_at` and keep the document. Idempotent-ish — a
    * missing or already-deleted user yields a 404.
    */
@@ -171,6 +250,7 @@ export class UsersService {
       first_name: user.first_name,
       last_name: user.last_name,
       username: user.username,
+      profile_picture: user.profile_picture ?? null,
       reputation: user.reputation,
       is_flaker: user.is_flaker,
       account_status: user.account_status,

@@ -8,6 +8,14 @@ import {
 import { UsersService } from './users.service';
 import { User, AccountStatus } from './schemas/user.schema';
 
+// Avatar cleanup unlinks files; keep it off the real filesystem in unit tests.
+jest.mock('node:fs/promises', () => ({
+  unlink: jest.fn().mockResolvedValue(undefined),
+}));
+import { unlink } from 'node:fs/promises';
+
+const mockUnlink = unlink as jest.MockedFunction<typeof unlink>;
+
 /** Build a chainable Mongoose query stub whose `.exec()` resolves to `result`. */
 function queryStub(result: unknown) {
   return {
@@ -27,6 +35,7 @@ describe('UsersService', () => {
   };
 
   beforeEach(async () => {
+    mockUnlink.mockClear();
     model = {
       findOne: jest.fn(),
       findById: jest.fn(),
@@ -194,6 +203,7 @@ describe('UsersService', () => {
           username: 'alex_r',
           email: 'alex@school.edu',
           password: 'hashed',
+          profile_picture: '/uploads/avatars/alex.jpg',
           reputation: 5,
           is_flaker: false,
           account_status: AccountStatus.Active,
@@ -210,6 +220,7 @@ describe('UsersService', () => {
         first_name: 'Alex',
         last_name: 'Rivera',
         username: 'alex_r',
+        profile_picture: '/uploads/avatars/alex.jpg',
         reputation: 5,
         is_flaker: false,
         account_status: AccountStatus.Active,
@@ -226,6 +237,94 @@ describe('UsersService', () => {
       await expect(service.getPublicProfile('missing')).rejects.toBeInstanceOf(
         NotFoundException,
       );
+    });
+  });
+
+  describe('setProfilePicture', () => {
+    const newPath = '/uploads/avatars/new.jpg';
+
+    it('stores the new path and deletes the file it replaces', async () => {
+      model.findOne.mockReturnValue(
+        queryStub({ id: 'user-id', profile_picture: '/uploads/avatars/old.png' }),
+      );
+      model.findOneAndUpdate.mockReturnValue(
+        queryStub({ id: 'user-id', profile_picture: newPath }),
+      );
+
+      const result = await service.setProfilePicture('user-id', newPath);
+
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: 'user-id', deleted_at: null },
+        { profile_picture: newPath },
+        { new: true },
+      );
+      expect(result.profile_picture).toBe(newPath);
+      expect(mockUnlink).toHaveBeenCalledWith(expect.stringContaining('old.png'));
+    });
+
+    it('does not unlink anything when the user had no previous picture', async () => {
+      model.findOne.mockReturnValue(
+        queryStub({ id: 'user-id', profile_picture: null }),
+      );
+      model.findOneAndUpdate.mockReturnValue(
+        queryStub({ id: 'user-id', profile_picture: newPath }),
+      );
+
+      await service.setProfilePicture('user-id', newPath);
+
+      expect(mockUnlink).not.toHaveBeenCalled();
+    });
+
+    it('cleans up the orphaned upload and 404s when the user is gone', async () => {
+      model.findOne.mockReturnValue(queryStub(null));
+
+      await expect(
+        service.setProfilePicture('missing', newPath),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(mockUnlink).toHaveBeenCalledWith(expect.stringContaining('new.jpg'));
+    });
+  });
+
+  describe('removeProfilePicture', () => {
+    it('clears the field and deletes the stored file', async () => {
+      model.findOne.mockReturnValue(
+        queryStub({ id: 'user-id', profile_picture: '/uploads/avatars/old.png' }),
+      );
+      model.findOneAndUpdate.mockReturnValue(
+        queryStub({ id: 'user-id', profile_picture: null }),
+      );
+
+      const result = await service.removeProfilePicture('user-id');
+
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: 'user-id', deleted_at: null },
+        { profile_picture: null },
+        { new: true },
+      );
+      expect(result.profile_picture).toBeNull();
+      expect(mockUnlink).toHaveBeenCalledWith(expect.stringContaining('old.png'));
+    });
+
+    it('is a no-op unlink when there is no picture to remove', async () => {
+      model.findOne.mockReturnValue(
+        queryStub({ id: 'user-id', profile_picture: null }),
+      );
+      model.findOneAndUpdate.mockReturnValue(
+        queryStub({ id: 'user-id', profile_picture: null }),
+      );
+
+      await service.removeProfilePicture('user-id');
+
+      expect(mockUnlink).not.toHaveBeenCalled();
+    });
+
+    it('throws 404 when the user does not exist or is deleted', async () => {
+      model.findOne.mockReturnValue(queryStub(null));
+
+      await expect(
+        service.removeProfilePicture('missing'),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

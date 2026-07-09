@@ -33,6 +33,12 @@ export class User {
   @Prop({ required: true, unique: true })
   email: string;
 
+  // Relative URL path to the user's uploaded avatar, e.g.
+  // `/uploads/avatars/<id>.jpg`, served as a static file. The bytes live on
+  // disk; only this path is stored on the row. Null when no picture is set.
+  @Prop({ type: String, default: null })
+  profile_picture: string | null;
+
   // Argon2id hash. `select: false` keeps it out of query results unless a query
   // explicitly asks for it (e.g. during login).
   @Prop({ required: true, select: false })

@@ -8,3 +8,5 @@ prod-dump/
 *.bson
 *.dump
 .git 2
+# Uploaded user files (profile pictures, etc.) — not tracked in git
+/uploads/

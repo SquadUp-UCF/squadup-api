@@ -11,6 +11,7 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { SwaggerModule } from '@nestjs/swagger';
+import { join } from 'node:path';
 import { AppModule } from './app.module';
 import { buildSwaggerConfig } from './swagger.config';
 
@@ -40,6 +41,11 @@ async function bootstrap() {
 
   // Allow browser clients (the mobile/web app) to call the API.
   app.enableCors();
+
+  // Serve uploaded files (e.g. profile pictures) from `uploads/` at
+  // `/uploads/...`. Static assets sit outside the `/api` prefix, so an avatar
+  // stored as `/uploads/avatars/<id>.jpg` resolves directly.
+  app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads/' });
 
   // Swagger / OpenAPI docs served at `/api/docs`. `addBearerAuth` lets the UI
   // attach a JWT so protected endpoints can be exercised from the browser. The

@@ -7,25 +7,39 @@
  *   GET    /api/users/:id   — another player's public profile
  */
 import {
+  BadRequestException,
   Controller,
   Get,
   Patch,
+  Put,
   Delete,
   Body,
   Param,
   HttpCode,
   HttpStatus,
+  UploadedFile,
+  UseFilters,
   UseGuards,
+  UseInterceptors,
   Query
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiOperation,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import {
+  AVATAR_FIELD,
+  avatarMulterOptions,
+  avatarPublicPath,
+  MulterExceptionFilter,
+} from './avatar-upload';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UserDocument } from './schemas/user.schema';
@@ -55,6 +69,49 @@ export class UsersController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.usersService.updateProfile(user.id, dto);
+  }
+
+  @Put('me/avatar')
+  @UseInterceptors(FileInterceptor(AVATAR_FIELD, avatarMulterOptions))
+  @UseFilters(MulterExceptionFilter)
+  @ApiOperation({ summary: "Upload or replace the authenticated user's picture" })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: [AVATAR_FIELD],
+      properties: {
+        [AVATAR_FIELD]: {
+          type: 'string',
+          format: 'binary',
+          description: 'JPEG, PNG, or WebP image, 5 MB max.',
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Updated profile with picture path.' })
+  @ApiResponse({ status: 400, description: 'Missing file or unsupported type.' })
+  @ApiResponse({ status: 413, description: 'Image exceeds the 5 MB limit.' })
+  uploadAvatar(
+    @CurrentUser() user: UserDocument,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException(
+        `No image file provided (multipart field "${AVATAR_FIELD}").`,
+      );
+    }
+    return this.usersService.setProfilePicture(
+      user.id,
+      avatarPublicPath(file.filename),
+    );
+  }
+
+  @Delete('me/avatar')
+  @ApiOperation({ summary: "Remove the authenticated user's picture" })
+  @ApiResponse({ status: 200, description: 'Picture removed.' })
+  removeAvatar(@CurrentUser() user: UserDocument) {
+    return this.usersService.removeProfilePicture(user.id);
   }
 
   @Delete('me')
