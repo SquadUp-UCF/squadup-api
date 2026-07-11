@@ -1,10 +1,12 @@
 /**
  * Authentication endpoints.
  *
- *   POST /api/auth/register    — create an account and receive a token
- *   POST /api/auth/login       — exchange credentials for a token
- *   POST /api/auth/send-code   — email a UCF verification code
- *   POST /api/auth/verify-code — redeem the code and activate the account
+ *   POST /api/auth/register       — create an account and receive a token
+ *   POST /api/auth/login          — exchange credentials for a token
+ *   POST /api/auth/send-code      — email a UCF verification code
+ *   POST /api/auth/verify-code    — redeem the code and activate the account
+ *   POST /api/auth/forgot-password — send a password reset link
+ *   POST /api/auth/reset-password  — reset the password using a token
  */
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -14,9 +16,9 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { SendCodeDto } from './dto/send-code.dto';
 import { VerifyCodeDto } from './dto/verify-code.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
-// Credential endpoints are prime abuse targets (brute force, enumeration,
-// signup spam), so cap them tighter than the global default: 10/min per IP.
 @Throttle({ default: { ttl: 60_000, limit: 10 } })
 @ApiTags('auth')
 @Controller('auth')
@@ -58,5 +60,22 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Invalid or expired code.' })
   verifyCode(@Body() dto: VerifyCodeDto) {
     return this.authService.verifyCode(dto);
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Send a password reset link to UCF email' })
+  @ApiResponse({ status: 200, description: 'Reset link sent if email exists.' })
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset password using a valid token' })
+  @ApiResponse({ status: 200, description: 'Password reset successfully.' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired token.' })
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
   }
 }

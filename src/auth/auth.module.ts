@@ -16,6 +16,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { PwnedPasswordService } from './pwned-password.service';
 import { EmailVerification, EmailVerificationSchema } from './schemas/email-verification.schema';
 import { ResendProvider } from './resend.provider';
+import { PasswordReset, PasswordResetSchema } from './schemas/password-reset.schema';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { ResendProvider } from './resend.provider';
     }),
     MongooseModule.forFeature([
       { name: EmailVerification.name, schema: EmailVerificationSchema },
+      { name: PasswordReset.name, schema: PasswordResetSchema },
     ]),
   ],
   controllers: [AuthController],
