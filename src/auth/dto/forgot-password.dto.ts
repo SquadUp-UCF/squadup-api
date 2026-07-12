@@ -1,11 +1,17 @@
+/**
+ * Payload for `POST /api/auth/forgot-password`.
+ */
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, Matches } from 'class-validator';
 
 export class ForgotPasswordDto {
-  @ApiProperty({ example: 'ta326121@ucf.edu' })
+  @ApiProperty({
+    example: 'alex@ucf.edu',
+    description: 'Must be a UCF email address (@ucf.edu).',
+  })
   @IsEmail()
   @Matches(/@ucf\.edu$/i, {
-    message: 'Must use a valid @ucf.edu email address.',
+    message: 'Registration is restricted to UCF email addresses (@ucf.edu)',
   })
   email: string;
 }

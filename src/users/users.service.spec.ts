@@ -164,6 +164,33 @@ describe('UsersService', () => {
     });
   });
 
+  describe('updatePasswordByEmail', () => {
+    it('stamps password_changed_at so a reset retires existing tokens', async () => {
+      model.updateOne.mockReturnValue(queryStub({ modifiedCount: 1 }));
+      const before = Date.now();
+
+      await service.updatePasswordByEmail('alex@ucf.edu', '$argon2id$hash');
+
+      const [filter, update] = model.updateOne.mock.calls[0];
+      expect(filter).toEqual({ email: 'alex@ucf.edu', deleted_at: null });
+      expect(update.password).toBe('$argon2id$hash');
+      expect(update.password_changed_at.getTime()).toBeGreaterThanOrEqual(
+        before,
+      );
+    });
+
+    it('refuses a soft-deleted account, so a stale link cannot revive it', async () => {
+      model.updateOne.mockReturnValue(queryStub({ modifiedCount: 0 }));
+
+      await service.updatePasswordByEmail('gone@ucf.edu', '$argon2id$hash');
+
+      expect(model.updateOne).toHaveBeenCalledWith(
+        expect.objectContaining({ deleted_at: null }),
+        expect.anything(),
+      );
+    });
+  });
+
   describe('game membership helpers', () => {
     it('adds a hosted game with $addToSet', async () => {
       model.updateOne.mockReturnValue(queryStub({ modifiedCount: 1 }));

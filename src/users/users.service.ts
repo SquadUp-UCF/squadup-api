@@ -40,6 +40,10 @@ export class UsersService {
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
   ) {}
 
+  /**
+   * Create a user. Expects an already-hashed password. Rejects duplicate
+   * email/username with a 409 instead of leaking a raw Mongo duplicate-key error.
+   */
   async create(data: {
     first_name: string;
     last_name: string;
@@ -56,6 +60,7 @@ export class UsersService {
     return this.userModel.create(data);
   }
 
+  /** Look up by email. Pass `withPassword` during login to include the hash. */
   findByEmail(email: string, withPassword = false): Promise<UserDocument | null> {
     const query = this.userModel.findOne({ email });
     if (withPassword) {
@@ -64,14 +69,20 @@ export class UsersService {
     return query.exec();
   }
 
+  /** Fetch a user by id, or null. */
   findById(id: string): Promise<UserDocument | null> {
     return this.userModel.findById(id).exec();
   }
 
+  /** Fetch a non-soft-deleted user by id (used by auth to validate a token). */
   findActiveById(id: string): Promise<UserDocument | null> {
     return this.userModel.findOne({ _id: id, deleted_at: null }).exec();
   }
 
+  /**
+   * Promote a pending account to active after email verification. Deliberately
+   * a no-op for any other status so verification can never lift a suspension.
+   */
   async activatePendingByEmail(email: string): Promise<void> {
     await this.userModel
       .updateOne(
@@ -81,16 +92,34 @@ export class UsersService {
       .exec();
   }
 
-  /** Update a user's password by email (used during password reset). */
-  async updatePasswordByEmail(email: string, passwordHash: string): Promise<void> {
+  /**
+   * Set a new password (already hashed) after a verified reset.
+   *
+   * `password_changed_at` is stamped in the same write: `JwtStrategy` rejects
+   * any token issued before it, so a reset immediately logs out every existing
+   * session — without that, an attacker holding a stolen JWT keeps their access
+   * until it expires on its own, which defeats the purpose of resetting.
+   *
+   * Suspended accounts are filtered out at the caller (`forgotPassword` never
+   * mails them a link); soft-deleted ones are refused here too, so a link issued
+   * before a deletion cannot resurrect the credentials.
+   */
+  async updatePasswordByEmail(
+    email: string,
+    passwordHash: string,
+  ): Promise<void> {
     await this.userModel
       .updateOne(
         { email, deleted_at: null },
-        { password: passwordHash },
+        { password: passwordHash, password_changed_at: new Date() },
       )
       .exec();
   }
 
+  /**
+   * Update the editable parts of a profile. Re-checks username uniqueness so a
+   * rename cannot collide with another user.
+   */
   async updateProfile(
     id: string,
     payload: UpdateProfileDto,
@@ -115,6 +144,11 @@ export class UsersService {
     return updated;
   }
 
+  /**
+   * Point a user's row at a freshly uploaded avatar (already written to disk by
+   * Multer) and remove the file it replaces. If the user is gone, the new file
+   * is cleaned up so a failed request never leaves an orphan behind.
+   */
   async setProfilePicture(
     id: string,
     publicPath: string,
@@ -144,6 +178,10 @@ export class UsersService {
     return updated;
   }
 
+  /**
+   * Clear a user's avatar and delete the underlying file. A no-op removal (no
+   * picture set) simply returns the user unchanged.
+   */
   async removeProfilePicture(id: string): Promise<UserDocument> {
     const current = await this.findActiveById(id);
     if (!current) {
@@ -168,14 +206,23 @@ export class UsersService {
     return updated;
   }
 
+  /**
+   * Best-effort deletion of a stored avatar file. Only the basename is used so a
+   * stored path can never point outside the avatar directory, and a missing file
+   * is ignored — the row is the source of truth, the file just backs it.
+   */
   private async deleteAvatarFile(publicPath: string): Promise<void> {
     try {
       await unlink(join(AVATAR_DIR, basename(publicPath)));
     } catch {
-      // Already gone — nothing to do.
+      // Already gone (manual cleanup, prior failure) — nothing to do.
     }
   }
 
+  /**
+   * Soft-delete: stamp `deleted_at` and keep the document. Idempotent-ish — a
+   * missing or already-deleted user yields a 404.
+   */
   async softDelete(id: string): Promise<void> {
     const result = await this.userModel
       .findOneAndUpdate(
@@ -188,30 +235,35 @@ export class UsersService {
     }
   }
 
+  /** Record that a user hosted a game (idempotent via `$addToSet`). */
   async addCreatedGame(userId: string, gameId: string): Promise<void> {
     await this.userModel
       .updateOne({ _id: userId }, { $addToSet: { games_created: gameId } })
       .exec();
   }
 
+  /** Record that a user joined a game (idempotent via `$addToSet`). */
   async addJoinedGame(userId: string, gameId: string): Promise<void> {
     await this.userModel
       .updateOne({ _id: userId }, { $addToSet: { games_joined: gameId } })
       .exec();
   }
 
+  /** Remove a game from a user's joined list when they leave. */
   async removeJoinedGame(userId: string, gameId: string): Promise<void> {
-  await this.userModel
+    await this.userModel
       .updateOne({ _id: userId }, { $pull: { games_joined: gameId } })
       .exec();
   }
 
+  /** Remove a game from a user's created list when the host deletes it. */
   async removeCreatedGame(userId: string, gameId: string): Promise<void> {
     await this.userModel
       .updateOne({ _id: userId }, { $pull: { games_created: gameId } })
       .exec();
   }
 
+  /** Fetch the public view of an active user, or 404 if missing/deleted. */
   async getPublicProfile(id: string): Promise<PublicProfile> {
     const user = await this.findActiveById(id);
     if (!user) {
@@ -226,6 +278,7 @@ export class UsersService {
       reputation: user.reputation,
       is_flaker: user.is_flaker,
       account_status: user.account_status,
+      // Mongoose stores this as a Map; expose it as a plain object for JSON.
       preferred_positions: user.preferred_positions
         ? Object.fromEntries(user.preferred_positions)
         : {},
@@ -234,9 +287,11 @@ export class UsersService {
     };
   }
 
-  async isUsernameTaken(username: string): Promise<boolean> {
+
+  async isUsernameTaken(username: string): Promise<boolean>{
     const existing = await this.userModel
       .findOne({ username, deleted_at: null })
+      // optional: case-insensitive match so "UserName" ≈ "username"
       .collation({ locale: 'en', strength: 2 })
       .exec();
     return !!existing;

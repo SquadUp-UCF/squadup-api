@@ -193,6 +193,7 @@ protecting registration.
    | `RESEND_API_KEY` | [Resend](https://resend.com) API key used to email verification codes |
    | `RESEND_FROM` | Optional; sender for verification emails. Defaults to Resend's sandbox address, which only delivers to the Resend account owner |
    | `EMAIL_LOGO_URL` | Optional; logo shown in the verification email header. Defaults to the production Squad-Up logo |
+   | `FRONTEND_URL` | Optional; base URL used to build the password-reset link. Defaults to production — set it to your local front end when testing the reset flow |
    | `PWNED_PASSWORD_CHECK` | Optional; set to `false` to disable the Have I Been Pwned breach check (default enabled) |
    | `TRUST_PROXY` | Optional; trusted proxy hops when behind a reverse proxy (set `1` in prod). Unset for local/direct runs |
 3. Run it:
