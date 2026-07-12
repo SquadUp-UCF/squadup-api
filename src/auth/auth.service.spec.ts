@@ -9,11 +9,13 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import * as argon2 from 'argon2';
+import { createHash } from 'crypto';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { PwnedPasswordService } from './pwned-password.service';
 import { AccountStatus } from '../users/schemas/user.schema';
 import { EmailVerification } from './schemas/email-verification.schema';
+import { PasswordReset } from './schemas/password-reset.schema';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -21,11 +23,18 @@ describe('AuthService', () => {
     create: jest.Mock;
     findByEmail: jest.Mock;
     activatePendingByEmail: jest.Mock;
+    updatePasswordByEmail: jest.Mock;
   };
   let jwtService: { sign: jest.Mock };
   let pwnedPasswordService: { isPwned: jest.Mock };
   let emailVerificationModel: {
     findOne: jest.Mock;
+    updateMany: jest.Mock;
+    create: jest.Mock;
+  };
+  let passwordResetModel: {
+    findOne: jest.Mock;
+    findOneAndUpdate: jest.Mock;
     updateMany: jest.Mock;
     create: jest.Mock;
   };
@@ -37,12 +46,20 @@ describe('AuthService', () => {
       create: jest.fn(),
       findByEmail: jest.fn(),
       activatePendingByEmail: jest.fn(),
+      updatePasswordByEmail: jest.fn().mockResolvedValue(undefined),
     };
     jwtService = { sign: jest.fn().mockReturnValue('signed.jwt.token') };
     // Default: password is not breached; individual tests override as needed.
     pwnedPasswordService = { isPwned: jest.fn().mockResolvedValue(false) };
     emailVerificationModel = {
       findOne: jest.fn().mockResolvedValue(null),
+      updateMany: jest.fn().mockResolvedValue({}),
+      create: jest.fn().mockResolvedValue({}),
+    };
+    passwordResetModel = {
+      findOne: jest.fn().mockResolvedValue(null),
+      // Default: the token is claimed successfully (nobody raced us).
+      findOneAndUpdate: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({}),
       create: jest.fn().mockResolvedValue({}),
     };
@@ -59,6 +76,10 @@ describe('AuthService', () => {
         {
           provide: getModelToken(EmailVerification.name),
           useValue: emailVerificationModel,
+        },
+        {
+          provide: getModelToken(PasswordReset.name),
+          useValue: passwordResetModel,
         },
         { provide: 'RESEND', useValue: resend },
       ],
@@ -369,6 +390,221 @@ describe('AuthService', () => {
       expect(record.save).toHaveBeenCalled();
       expect(usersService.activatePendingByEmail).toHaveBeenCalledWith(email);
       expect(result).toEqual({ message: 'Email verified successfully.' });
+    });
+  });
+
+  describe('forgotPassword', () => {
+    const email = 'alex@ucf.edu';
+    const GENERIC = 'If that email exists, a reset link has been sent.';
+
+    const activeUser = {
+      account_status: AccountStatus.Active,
+      deleted_at: null,
+    };
+
+    /** The token embedded in the emailed link, recovered from the sent HTML. */
+    const sentToken = (): string => {
+      const { html } = resend.emails.send.mock.calls[0][0];
+      return /reset-password\?token=([a-f0-9]+)/.exec(html)![1];
+    };
+
+    it('rejects a non-UCF email with 400 before touching the DB', async () => {
+      await expect(
+        service.forgotPassword({ email: 'alex@gmail.com' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(passwordResetModel.create).not.toHaveBeenCalled();
+      expect(resend.emails.send).not.toHaveBeenCalled();
+    });
+
+    it('answers generically for an unknown email without sending', async () => {
+      usersService.findByEmail.mockResolvedValue(null);
+
+      const result = await service.forgotPassword({ email });
+
+      expect(result).toEqual({ message: GENERIC });
+      expect(resend.emails.send).not.toHaveBeenCalled();
+      expect(passwordResetModel.create).not.toHaveBeenCalled();
+    });
+
+    it('answers generically for a suspended account without sending', async () => {
+      usersService.findByEmail.mockResolvedValue({
+        account_status: AccountStatus.Suspended,
+        deleted_at: null,
+      });
+
+      const result = await service.forgotPassword({ email });
+
+      // Same message as a real send — a suspension must stay invisible here.
+      expect(result).toEqual({ message: GENERIC });
+      expect(resend.emails.send).not.toHaveBeenCalled();
+    });
+
+    it('answers generically for a soft-deleted account without sending', async () => {
+      usersService.findByEmail.mockResolvedValue({
+        account_status: AccountStatus.Active,
+        deleted_at: new Date(),
+      });
+
+      const result = await service.forgotPassword({ email });
+
+      expect(result).toEqual({ message: GENERIC });
+      expect(resend.emails.send).not.toHaveBeenCalled();
+    });
+
+    it('stores only a SHA-256 hash of the token, never the token itself', async () => {
+      usersService.findByEmail.mockResolvedValue(activeUser);
+
+      await service.forgotPassword({ email });
+
+      const token = sentToken();
+      const stored = passwordResetModel.create.mock.calls[0][0];
+
+      expect(stored.token_hash).toBe(
+        createHash('sha256').update(token).digest('hex'),
+      );
+      // The emailed secret must not be recoverable from the stored row.
+      expect(JSON.stringify(stored)).not.toContain(token);
+      expect(stored).not.toHaveProperty('token');
+    });
+
+    it('issues a 32-byte token with a one-hour expiry', async () => {
+      usersService.findByEmail.mockResolvedValue(activeUser);
+      const before = Date.now();
+
+      await service.forgotPassword({ email });
+
+      expect(sentToken()).toHaveLength(64); // 32 bytes, hex-encoded
+      const { expires_at } = passwordResetModel.create.mock.calls[0][0];
+      const ttl = expires_at.getTime() - before;
+      expect(ttl).toBeGreaterThan(59 * 60 * 1000);
+      expect(ttl).toBeLessThanOrEqual(60 * 60 * 1000);
+    });
+
+    it('invalidates older links before issuing a new one', async () => {
+      usersService.findByEmail.mockResolvedValue(activeUser);
+
+      await service.forgotPassword({ email });
+
+      expect(passwordResetModel.updateMany).toHaveBeenCalledWith(
+        { email, used: false },
+        { used: true },
+      );
+    });
+
+    it('stays silent during the per-email cooldown without sending', async () => {
+      usersService.findByEmail.mockResolvedValue(activeUser);
+      passwordResetModel.findOne.mockResolvedValue({ email }); // a recent link
+
+      const result = await service.forgotPassword({ email });
+
+      // Generic even here: a cooldown that only fired for real accounts would
+      // leak existence as loudly as an explicit "no such user".
+      expect(result).toEqual({ message: GENERIC });
+      expect(resend.emails.send).not.toHaveBeenCalled();
+      expect(passwordResetModel.create).not.toHaveBeenCalled();
+    });
+
+    it('normalizes the email to lowercase before storing and sending', async () => {
+      usersService.findByEmail.mockResolvedValue(activeUser);
+
+      await service.forgotPassword({ email: 'Alex@UCF.edu' });
+
+      expect(passwordResetModel.create.mock.calls[0][0].email).toBe(email);
+      expect(resend.emails.send.mock.calls[0][0].to).toBe(email);
+    });
+
+    it('surfaces a failed send as 502', async () => {
+      usersService.findByEmail.mockResolvedValue(activeUser);
+      resend.emails.send.mockResolvedValue({ error: { message: 'nope' } });
+
+      await expect(service.forgotPassword({ email })).rejects.toBeInstanceOf(
+        HttpException,
+      );
+    });
+  });
+
+  describe('resetPassword', () => {
+    const email = 'alex@ucf.edu';
+    const token = 'a'.repeat(64);
+    const new_password = 'N3wPassw0rd!';
+    const token_hash = createHash('sha256').update(token).digest('hex');
+
+    const liveRecord = () => ({ _id: 'reset-1', email, used: false });
+
+    it('rejects an unknown or expired token with 400', async () => {
+      passwordResetModel.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.resetPassword({ token, new_password }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(usersService.updatePasswordByEmail).not.toHaveBeenCalled();
+    });
+
+    it('looks the token up by hash, never by its raw value', async () => {
+      passwordResetModel.findOne.mockResolvedValue(liveRecord());
+
+      await service.resetPassword({ token, new_password });
+
+      expect(passwordResetModel.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ token_hash, used: false }),
+      );
+    });
+
+    it('rejects a weak password with 400 without consuming the token', async () => {
+      passwordResetModel.findOne.mockResolvedValue(liveRecord());
+
+      await expect(
+        service.resetPassword({ token, new_password: 'weak' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(passwordResetModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(usersService.updatePasswordByEmail).not.toHaveBeenCalled();
+    });
+
+    it('rejects a breached password with 400 without consuming the token', async () => {
+      passwordResetModel.findOne.mockResolvedValue(liveRecord());
+      pwnedPasswordService.isPwned.mockResolvedValue(true);
+
+      await expect(
+        service.resetPassword({ token, new_password }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      // The user's one link must survive a rejected password.
+      expect(passwordResetModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(usersService.updatePasswordByEmail).not.toHaveBeenCalled();
+    });
+
+    it('claims the token atomically, guarded on used: false', async () => {
+      passwordResetModel.findOne.mockResolvedValue(liveRecord());
+
+      await service.resetPassword({ token, new_password });
+
+      expect(passwordResetModel.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: 'reset-1', used: false },
+        { used: true },
+      );
+    });
+
+    it('does not change the password when a concurrent request already claimed the token', async () => {
+      passwordResetModel.findOne.mockResolvedValue(liveRecord());
+      // The atomic claim matches nothing: another request won the race.
+      passwordResetModel.findOneAndUpdate.mockResolvedValue(null);
+
+      await expect(
+        service.resetPassword({ token, new_password }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(usersService.updatePasswordByEmail).not.toHaveBeenCalled();
+    });
+
+    it('stores an Argon2id hash of the new password, never the plaintext', async () => {
+      passwordResetModel.findOne.mockResolvedValue(liveRecord());
+
+      const result = await service.resetPassword({ token, new_password });
+
+      const [toEmail, hash] = usersService.updatePasswordByEmail.mock.calls[0];
+      expect(toEmail).toBe(email);
+      expect(hash).not.toBe(new_password);
+      expect(hash.startsWith('$argon2id$')).toBe(true);
+      await expect(argon2.verify(hash, new_password)).resolves.toBe(true);
+      expect(result).toEqual({ message: 'Password reset successfully.' });
     });
   });
 });

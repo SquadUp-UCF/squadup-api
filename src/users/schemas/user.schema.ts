@@ -44,6 +44,12 @@ export class User {
   @Prop({ required: true, select: false })
   password: string;
 
+  // When the password was last reset. `JwtStrategy` refuses any token issued
+  // before this instant, so a reset revokes every session that was already
+  // open. Null for accounts that have never reset — their tokens all stand.
+  @Prop({ type: Date, default: null })
+  password_changed_at: Date | null;
+
   // Float rating set when players rate each other before/after a match.
   // New users start at 5.0 (benefit of the doubt) on a 0.0–5.0 scale.
   @Prop({ default: 5.0, min: 0, max: 5 })

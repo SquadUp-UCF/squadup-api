@@ -93,6 +93,30 @@ export class UsersService {
   }
 
   /**
+   * Set a new password (already hashed) after a verified reset.
+   *
+   * `password_changed_at` is stamped in the same write: `JwtStrategy` rejects
+   * any token issued before it, so a reset immediately logs out every existing
+   * session — without that, an attacker holding a stolen JWT keeps their access
+   * until it expires on its own, which defeats the purpose of resetting.
+   *
+   * Suspended accounts are filtered out at the caller (`forgotPassword` never
+   * mails them a link); soft-deleted ones are refused here too, so a link issued
+   * before a deletion cannot resurrect the credentials.
+   */
+  async updatePasswordByEmail(
+    email: string,
+    passwordHash: string,
+  ): Promise<void> {
+    await this.userModel
+      .updateOne(
+        { email, deleted_at: null },
+        { password: passwordHash, password_changed_at: new Date() },
+      )
+      .exec();
+  }
+
+  /**
    * Update the editable parts of a profile. Re-checks username uniqueness so a
    * rename cannot collide with another user.
    */
