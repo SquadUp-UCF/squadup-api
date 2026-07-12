@@ -6,6 +6,7 @@ import { Game, GameStatus, ParticipantStatus } from './schemas/game.schema';
 import { MyGamesRole } from './dto/my-games.dto';
 import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { bannerForSport } from './sport-banners';
 
 /** Query stub whose `.exec()` resolves to `result`; `.sort()` chains. */
 function queryStub(result: unknown) {
@@ -100,8 +101,11 @@ describe('GamesService', () => {
 
       await service.create('host-id', validCreate);
 
+      // Asserted through the resolver, not a literal path: which file backs a
+      // sport (.jpg vs the .svg placeholder) is an asset detail, and the rule
+      // under test is only "it defaults to that sport's stock banner".
       expect(model.create).toHaveBeenCalledWith(
-        expect.objectContaining({ photo_url: '/sports/soccer.svg' }),
+        expect.objectContaining({ photo_url: bannerForSport('soccer') }),
       );
     });
 
@@ -340,10 +344,10 @@ describe('GamesService', () => {
     });
 
     it('re-points a stock banner when the sport changes', async () => {
-      const game = makeGame({ photo_url: '/sports/soccer.svg' });
+      const game = makeGame({ photo_url: bannerForSport('soccer') });
       model.findById.mockReturnValue(queryStub(game));
       await service.update('game-id', 'host-id', { sport: 'tennis' });
-      expect(game.photo_url).toBe('/sports/tennis.svg');
+      expect(game.photo_url).toBe(bannerForSport('tennis'));
     });
 
     it('keeps a custom banner even when the sport changes', async () => {
