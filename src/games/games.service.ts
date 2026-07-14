@@ -18,9 +18,12 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { unlink } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import { Game, GameDocument, GameStatus, ParticipantStatus } from './schemas/game.schema';
 import { CreateGameDto } from './dto/create-game.dto';
 import { UpdateGameDto } from './dto/update-game.dto';
+import { JoinGameDto } from './dto/join-game.dto';
 import { ListGamesDto } from './dto/list-games.dto';
 import { MyGamesDto, MyGamesRole } from './dto/my-games.dto';
 import { validateDto } from '../common/validation/validate-dto';
@@ -28,6 +31,7 @@ import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/schemas/notification.schema';
 import { bannerForSport, isStockBanner } from './sport-banners';
+import { BANNER_DIR } from './banner-upload';
 
 const TERMINAL_STATUSES: GameStatus[] = [
   GameStatus.Completed,
@@ -150,7 +154,16 @@ export class GamesService {
     return game.save();
   }
 
-  async join(id: string, userId: string): Promise<GameDocument> {
+  /**
+   * Join a game's roster. `partySize` is the total headcount this join
+   * represents (the caller plus however many they're bringing) — it counts
+   * toward `min_players`/`max_players` in place of a flat 1-per-participant
+   * count, so a join is rejected if the group wouldn't fit in the remaining
+   * spots even though the roster isn't technically full yet.
+   */
+  async join(id: string, userId: string, payload: JoinGameDto = {}): Promise<GameDocument> {
+    const dto = await validateDto(JoinGameDto, payload);
+    const partySize = dto.party_size ?? 1;
     const game = await this.findByIdOrFail(id);
 
     if (game.status === GameStatus.Locked) {
@@ -169,14 +182,26 @@ export class GamesService {
     if (existing?.status === ParticipantStatus.Joined) {
       throw new BadRequestException('Already joined this game');
     }
+
+    const remaining = game.max_players - this.activePartySize(game);
+    if (partySize > remaining) {
+      throw new BadRequestException(
+        remaining <= 0
+          ? 'Game is full'
+          : `Only ${remaining} spot${remaining === 1 ? '' : 's'} left`,
+      );
+    }
+
     if (existing) {
       existing.status = ParticipantStatus.Joined;
       existing.joined_at = new Date();
+      existing.party_size = partySize;
     } else {
       game.participants.push({
         user: userId as unknown as GameDocument['participants'][number]['user'],
         status: ParticipantStatus.Joined,
         joined_at: new Date(),
+        party_size: partySize,
       });
     }
 
@@ -302,6 +327,56 @@ return game;
     await this.usersService.removeCreatedGame(userId, game.id);
   }
 
+  /**
+   * Point a game's banner at a freshly uploaded image (already written to
+   * disk by Multer) and remove the file it replaces — but only when that
+   * previous file was itself a host upload, never a committed stock banner.
+   */
+  async setPhoto(id: string, userId: string, publicPath: string): Promise<GameDocument> {
+    const game = await this.findByIdOrFail(id);
+    this.assertHost(game, userId);
+
+    const previous = game.photo_url;
+    game.photo_url = publicPath;
+    await game.save();
+
+    if (!isStockBanner(previous)) {
+      await this.deleteBannerFile(previous as string);
+    }
+    return game;
+  }
+
+  /**
+   * Revert a game's banner to the sport's stock default, removing the
+   * uploaded file if one was set.
+   */
+  async removePhoto(id: string, userId: string): Promise<GameDocument> {
+    const game = await this.findByIdOrFail(id);
+    this.assertHost(game, userId);
+
+    const previous = game.photo_url;
+    game.photo_url = bannerForSport(game.sport);
+    await game.save();
+
+    if (!isStockBanner(previous)) {
+      await this.deleteBannerFile(previous as string);
+    }
+    return game;
+  }
+
+  /**
+   * Best-effort deletion of a stored banner file. Only the basename is used so
+   * a stored path can never point outside the banner directory, and a missing
+   * file is ignored — the row is the source of truth, the file just backs it.
+   */
+  private async deleteBannerFile(publicPath: string): Promise<void> {
+    try {
+      await unlink(join(BANNER_DIR, basename(publicPath)));
+    } catch {
+      // Already gone (manual cleanup, prior failure) — nothing to do.
+    }
+  }
+
   // --- helpers -------------------------------------------------------------
 
   private isTerminal(game: GameDocument): boolean {
@@ -320,13 +395,18 @@ return game;
     }
   }
 
+  /** Sum of `party_size` across `joined` participants — the real headcount. */
+  private activePartySize(game: GameDocument): number {
+    return game.participants
+      .filter((p) => p.status === ParticipantStatus.Joined)
+      .reduce((sum, p) => sum + (p.party_size || 1), 0);
+  }
+
   private recomputeStatus(game: GameDocument): void {
     if (this.isTerminal(game)) {
       return;
     }
-    const active = game.participants.filter(
-      (p) => p.status === ParticipantStatus.Joined,
-    ).length;
+    const active = this.activePartySize(game);
 
     if (active >= game.max_players) {
       game.status = GameStatus.Locked;

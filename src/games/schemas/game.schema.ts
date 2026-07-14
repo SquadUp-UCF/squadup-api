@@ -48,6 +48,13 @@ export class Participant {
 
   @Prop({ type: Date, default: Date.now })
   joined_at: Date;
+
+  // Headcount this join represents, including the joining user themselves —
+  // lets one account RSVP for a group (e.g. "3" means them + 2 friends) rather
+  // than requiring every attendee to have their own account. Counts toward
+  // min/max thresholds in place of a flat 1-per-participant count.
+  @Prop({ default: 1, min: 1 })
+  party_size: number;
 }
 
 export const ParticipantSchema = SchemaFactory.createForClass(Participant);

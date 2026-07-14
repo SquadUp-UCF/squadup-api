@@ -43,6 +43,7 @@ import { SendCodeDto } from './dto/send-code.dto';
 import { VerifyCodeDto } from './dto/verify-code.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { PwnedPasswordService } from './pwned-password.service';
 import {
   EmailVerification,
@@ -393,6 +394,52 @@ export class AuthService {
     await this.usersService.updatePasswordByEmail(record.email, passwordHash);
 
     return { message: 'Password reset successfully.' };
+  }
+
+  /**
+   * Change the authenticated user's password. Unlike `resetPassword`, identity
+   * is already proven by the caller's JWT, so this proves intent instead by
+   * requiring the current password.
+   *
+   * Stamps `password_changed_at` on success, which retires every JWT issued
+   * before now — including the one that authenticated this very request — so
+   * the caller must log in again afterward. That is the same trade-off
+   * `resetPassword` makes, deliberately: a password change should not leave
+   * old sessions (e.g. on a stolen device) still valid.
+   */
+  async changePassword(
+    userId: string,
+    payload: ChangePasswordDto,
+  ): Promise<{ message: string }> {
+    const dto = await validateDto(ChangePasswordDto, payload);
+
+    // Must explicitly request the password — it is `select: false` by default.
+    const user = await this.usersService.findById(userId, true);
+    if (!user) {
+      throw new UnauthorizedException();
+    }
+
+    const currentMatches = await argon2.verify(
+      user.password,
+      dto.current_password,
+    );
+    if (!currentMatches) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    // Reject passwords known to have appeared in a public breach.
+    if (await this.pwnedPasswordService.isPwned(dto.new_password)) {
+      throw new BadRequestException(
+        'This password has appeared in a known data breach; please choose another.',
+      );
+    }
+
+    const passwordHash = await argon2.hash(dto.new_password, {
+      type: argon2.argon2id,
+    });
+    await this.usersService.updatePasswordById(userId, passwordHash);
+
+    return { message: 'Password changed successfully. Please log in again.' };
   }
 
   /**

@@ -265,6 +265,46 @@ describe('GamesService', () => {
       expect(game.participants).toHaveLength(2);
       expect(game.participants[1].status).toBe(ParticipantStatus.Joined);
     });
+
+    it('defaults party_size to 1 when none is given', async () => {
+      const game = makeGame();
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.join('game-id', 'u2');
+
+      expect(game.participants[1].party_size).toBe(1);
+    });
+
+    it("counts a party's full headcount toward min/max instead of 1 per join", async () => {
+      // min 2, max 3, host already in (1) — a party of 2 fills the rest.
+      const game = makeGame();
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.join('game-id', 'u2', { party_size: 2 });
+
+      expect(game.participants[1].party_size).toBe(2);
+      expect(game.status).toBe(GameStatus.Locked);
+    });
+
+    it("rejects a party too large for the remaining spots", async () => {
+      // min 2, max 3, host already in (1) — only 2 spots remain.
+      const game = makeGame();
+      model.findById.mockReturnValue(queryStub(game));
+
+      await expect(
+        service.join('game-id', 'u2', { party_size: 3 }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(game.participants).toHaveLength(1); // nothing was added
+    });
+
+    it('rejects a party_size below 1', async () => {
+      const game = makeGame();
+      model.findById.mockReturnValue(queryStub(game));
+
+      await expect(
+        service.join('game-id', 'u2', { party_size: 0 }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
   });
 
   describe('leave', () => {

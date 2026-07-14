@@ -22,8 +22,10 @@ describe('AuthService', () => {
   let usersService: {
     create: jest.Mock;
     findByEmail: jest.Mock;
+    findById: jest.Mock;
     activatePendingByEmail: jest.Mock;
     updatePasswordByEmail: jest.Mock;
+    updatePasswordById: jest.Mock;
   };
   let jwtService: { sign: jest.Mock };
   let pwnedPasswordService: { isPwned: jest.Mock };
@@ -45,8 +47,10 @@ describe('AuthService', () => {
     usersService = {
       create: jest.fn(),
       findByEmail: jest.fn(),
+      findById: jest.fn(),
       activatePendingByEmail: jest.fn(),
       updatePasswordByEmail: jest.fn().mockResolvedValue(undefined),
+      updatePasswordById: jest.fn().mockResolvedValue(undefined),
     };
     jwtService = { sign: jest.fn().mockReturnValue('signed.jwt.token') };
     // Default: password is not breached; individual tests override as needed.
@@ -605,6 +609,84 @@ describe('AuthService', () => {
       expect(hash.startsWith('$argon2id$')).toBe(true);
       await expect(argon2.verify(hash, new_password)).resolves.toBe(true);
       expect(result).toEqual({ message: 'Password reset successfully.' });
+    });
+  });
+
+  describe('changePassword', () => {
+    const userId = 'user-id';
+    const current_password = 'CurrentPassw0rd!';
+    const new_password = 'N3wPassw0rd!';
+
+    const buildUser = async (overrides = {}) => ({
+      id: userId,
+      password: await argon2.hash(current_password, { type: argon2.argon2id }),
+      ...overrides,
+    });
+
+    it('rejects when there is no authenticated user with 401', async () => {
+      usersService.findById.mockResolvedValue(null);
+
+      await expect(
+        service.changePassword(userId, { current_password, new_password }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(usersService.updatePasswordById).not.toHaveBeenCalled();
+    });
+
+    it('looks the user up with the password field selected', async () => {
+      usersService.findById.mockResolvedValue(await buildUser());
+
+      await service.changePassword(userId, { current_password, new_password });
+
+      expect(usersService.findById).toHaveBeenCalledWith(userId, true);
+    });
+
+    it('rejects an incorrect current password with 400 without changing anything', async () => {
+      usersService.findById.mockResolvedValue(await buildUser());
+
+      await expect(
+        service.changePassword(userId, {
+          current_password: 'WrongPassw0rd!',
+          new_password,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(usersService.updatePasswordById).not.toHaveBeenCalled();
+    });
+
+    it('rejects a weak new password with 400 without changing anything', async () => {
+      usersService.findById.mockResolvedValue(await buildUser());
+
+      await expect(
+        service.changePassword(userId, { current_password, new_password: 'weak' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(usersService.updatePasswordById).not.toHaveBeenCalled();
+    });
+
+    it('rejects a breached new password with 400 without changing anything', async () => {
+      usersService.findById.mockResolvedValue(await buildUser());
+      pwnedPasswordService.isPwned.mockResolvedValue(true);
+
+      await expect(
+        service.changePassword(userId, { current_password, new_password }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(usersService.updatePasswordById).not.toHaveBeenCalled();
+    });
+
+    it('stores an Argon2id hash of the new password by id, never the plaintext', async () => {
+      usersService.findById.mockResolvedValue(await buildUser());
+
+      const result = await service.changePassword(userId, {
+        current_password,
+        new_password,
+      });
+
+      const [id, hash] = usersService.updatePasswordById.mock.calls[0];
+      expect(id).toBe(userId);
+      expect(hash).not.toBe(new_password);
+      expect(hash.startsWith('$argon2id$')).toBe(true);
+      await expect(argon2.verify(hash, new_password)).resolves.toBe(true);
+      expect(result).toEqual({
+        message: 'Password changed successfully. Please log in again.',
+      });
     });
   });
 });

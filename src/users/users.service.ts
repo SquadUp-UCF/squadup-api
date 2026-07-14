@@ -69,9 +69,13 @@ export class UsersService {
     return query.exec();
   }
 
-  /** Fetch a user by id, or null. */
-  findById(id: string): Promise<UserDocument | null> {
-    return this.userModel.findById(id).exec();
+  /** Fetch a user by id, or null. Pass `withPassword` to include the hash. */
+  findById(id: string, withPassword = false): Promise<UserDocument | null> {
+    const query = this.userModel.findById(id);
+    if (withPassword) {
+      query.select('+password');
+    }
+    return query.exec();
   }
 
   /** Fetch a non-soft-deleted user by id (used by auth to validate a token). */
@@ -111,6 +115,21 @@ export class UsersService {
     await this.userModel
       .updateOne(
         { email, deleted_at: null },
+        { password: passwordHash, password_changed_at: new Date() },
+      )
+      .exec();
+  }
+
+  /**
+   * Set a new password (already hashed) by id — the authenticated-change-password
+   * counterpart to `updatePasswordByEmail`. Also stamps `password_changed_at`,
+   * which retires every JWT issued before this call, including the one used to
+   * make this very request.
+   */
+  async updatePasswordById(id: string, passwordHash: string): Promise<void> {
+    await this.userModel
+      .updateOne(
+        { _id: id, deleted_at: null },
         { password: passwordHash, password_changed_at: new Date() },
       )
       .exec();
