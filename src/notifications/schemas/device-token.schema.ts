@@ -11,7 +11,7 @@ export class DeviceToken {
   @Prop({ required: true })
   token: string;
 
-  @Prop({ default: 'ios', enum: ['ios', 'android'] })
+  @Prop({ default: 'ios', enum: ['ios', 'android', 'web'] })
   platform: string;
 }
 

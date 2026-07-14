@@ -6,12 +6,15 @@
  *   GET    /api/games              — discover games (sport/status/upcoming)
  *   GET    /api/games/:id          — a single game
  *   PATCH  /api/games/:id          — edit a game (host only)
+ *   PUT    /api/games/:id/photo    — upload/replace a game's banner (host only)
+ *   DELETE /api/games/:id/photo    — remove a game's banner, reverting to the sport's stock default (host only)
  *   POST   /api/games/:id/join     — join a game's roster
  *   POST   /api/games/:id/leave    — leave a game's roster
  *   POST   /api/games/:id/cancel   — cancel a game (host only)
  *   POST   /api/games/:id/complete — mark a game completed (host only)
  */
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -21,11 +24,18 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
+  UploadedFile,
+  UseFilters,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -33,8 +43,15 @@ import {
 import { GamesService } from './games.service';
 import { CreateGameDto } from './dto/create-game.dto';
 import { UpdateGameDto } from './dto/update-game.dto';
+import { JoinGameDto } from './dto/join-game.dto';
 import { ListGamesDto } from './dto/list-games.dto';
 import { MyGamesDto } from './dto/my-games.dto';
+import {
+  BANNER_FIELD,
+  bannerMulterOptions,
+  bannerPublicPath,
+} from './banner-upload';
+import { MulterExceptionFilter } from '../users/avatar-upload';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UserDocument } from '../users/schemas/user.schema';
@@ -89,6 +106,49 @@ export class GamesController {
     return this.gamesService.update(id, user.id, dto);
   }
 
+  @Put(':id/photo')
+  @UseInterceptors(FileInterceptor(BANNER_FIELD, bannerMulterOptions))
+  @UseFilters(MulterExceptionFilter)
+  @ApiOperation({ summary: "Upload or replace a game's banner (host only)" })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: [BANNER_FIELD],
+      properties: {
+        [BANNER_FIELD]: {
+          type: 'string',
+          format: 'binary',
+          description: 'JPEG, PNG, or WebP image, 5 MB max.',
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Updated game with banner path.' })
+  @ApiResponse({ status: 400, description: 'Missing file or unsupported type.' })
+  @ApiResponse({ status: 403, description: 'Only the host can set the banner.' })
+  @ApiResponse({ status: 413, description: 'Image exceeds the 5 MB limit.' })
+  uploadPhoto(
+    @CurrentUser() user: UserDocument,
+    @Param('id') id: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException(
+        `No image file provided (multipart field "${BANNER_FIELD}").`,
+      );
+    }
+    return this.gamesService.setPhoto(id, user.id, bannerPublicPath(file.filename));
+  }
+
+  @Delete(':id/photo')
+  @ApiOperation({ summary: "Remove a game's banner, reverting to the sport's stock default (host only)" })
+  @ApiResponse({ status: 200, description: 'Updated game with the stock banner restored.' })
+  @ApiResponse({ status: 403, description: 'Only the host can remove the banner.' })
+  removePhoto(@CurrentUser() user: UserDocument, @Param('id') id: string) {
+    return this.gamesService.removePhoto(id, user.id);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a game (host only)' })
@@ -99,11 +159,11 @@ export class GamesController {
   }
 
   @Post(':id/join')
-  @ApiOperation({ summary: 'Join a game' })
+  @ApiOperation({ summary: "Join a game, optionally for a party of more than one" })
   @ApiResponse({ status: 200, description: 'The joined game.' })
-  @ApiResponse({ status: 400, description: 'Game full/started or already joined.' })
-  join(@CurrentUser() user: UserDocument, @Param('id') id: string) {
-    return this.gamesService.join(id, user.id);
+  @ApiResponse({ status: 400, description: "Game full/started, already joined, or the party doesn't fit the remaining spots." })
+  join(@CurrentUser() user: UserDocument, @Param('id') id: string, @Body() dto: JoinGameDto) {
+    return this.gamesService.join(id, user.id, dto);
   }
 
   @Post(':id/leave')

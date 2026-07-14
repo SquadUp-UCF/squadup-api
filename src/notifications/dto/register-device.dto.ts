@@ -9,6 +9,6 @@ export class RegisterDeviceDto {
 
   @ApiProperty({ example: 'ios', required: false })
   @IsOptional()
-  @IsIn(['ios', 'android'])
+  @IsIn(['ios', 'android', 'web'])
   platform?: string;
 }
