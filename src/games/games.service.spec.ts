@@ -215,6 +215,20 @@ describe('GamesService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(model.create).not.toHaveBeenCalled();
     });
+
+    it("sets the host's own position when provided", async () => {
+      model.create.mockResolvedValue(makeGame());
+
+      await service.create('host-id', { ...validCreate, host_position: 'Midfielder' });
+
+      expect(model.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          participants: [
+            { user: 'host-id', status: ParticipantStatus.Joined, position: 'Midfielder' },
+          ],
+        }),
+      );
+    });
   });
 
   describe('findMany', () => {
@@ -511,6 +525,44 @@ describe('GamesService', () => {
       await expect(
         service.removeGuest('game-id', 'stranger', 1),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('setMyPosition', () => {
+    it("sets the caller's own position", async () => {
+      const game = makeGame({
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { user: 'u2', status: ParticipantStatus.Joined },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.setMyPosition('game-id', 'u2', { position: 'Forward' });
+
+      expect(game.participants[1].position).toBe('Forward');
+      expect(game.save).toHaveBeenCalled();
+    });
+
+    it('clears the position when sent empty', async () => {
+      const game = makeGame({
+        participants: [
+          { user: 'host-id', position: 'GK', status: ParticipantStatus.Joined },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.setMyPosition('game-id', 'host-id', { position: '' });
+
+      expect(game.participants[0].position).toBeUndefined();
+    });
+
+    it('rejects a caller who is not on the roster', async () => {
+      const game = makeGame();
+      model.findById.mockReturnValue(queryStub(game));
+      await expect(
+        service.setMyPosition('game-id', 'stranger', { position: 'X' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 

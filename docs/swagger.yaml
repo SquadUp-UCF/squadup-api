@@ -524,6 +524,29 @@ paths:
           description: Only the host can remove guests.
       tags: *ref_3
       security: *ref_4
+  /api/games/{id}/position:
+    patch:
+      operationId: GamesController_setMyPosition
+      summary: Set your own position on a game you're on
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetPositionDto'
+      responses:
+        '200':
+          description: The updated game.
+        '400':
+          description: Not on the roster, or the game is terminal.
+      tags: *ref_3
+      security: *ref_4
   /api/games/{id}/cancel:
     post:
       operationId: GamesController_cancel
@@ -808,6 +831,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/InitialPlayerDto'
+        host_position:
+          type: string
+          example: Midfielder
+          description: >-
+            The host's own (optional, sport-specific) position on the roster.
+            The host is auto-added as a player, so this records where they play.
       required:
         - sport
         - location
@@ -860,6 +889,13 @@ components:
           description: >-
             Total headcount this join represents, including the caller. Rejected
             if the group would exceed the remaining spots.
+    SetPositionDto:
+      type: object
+      properties:
+        position:
+          type: string
+          example: Midfielder
+          description: Your (sport-specific, free-text) position. Empty/omitted clears it.
     RegisterDeviceDto:
       type: object
       properties:

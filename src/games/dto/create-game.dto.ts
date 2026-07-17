@@ -102,4 +102,15 @@ export class CreateGameDto {
   @ValidateNested({ each: true })
   @Type(() => InitialPlayerDto)
   players?: InitialPlayerDto[];
+
+  @ApiPropertyOptional({
+    example: 'Midfielder',
+    description:
+      "The host's own (optional, sport-specific) position on the roster. The host " +
+      'is auto-added as a player, so this records where they play.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  host_position?: string;
 }

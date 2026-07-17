@@ -54,6 +54,15 @@ async function bootstrap() {
     prefix: '/sports/',
   });
 
+  // Also expose the same assets under the `/api` prefix. In production the API
+  // sits behind a reverse proxy that forwards only `/api/*` to this app, so the
+  // bare `/uploads` and `/sports` mounts above aren't reachable there — clients
+  // resolve media under `/api` (e.g. `/api/sports/soccer.jpg`) instead.
+  app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/api/uploads/' });
+  app.useStaticAssets(join(process.cwd(), 'public', 'sports'), {
+    prefix: '/api/sports/',
+  });
+
   // Swagger / OpenAPI docs served at `/api/docs`. `addBearerAuth` lets the UI
   // attach a JWT so protected endpoints can be exercised from the browser. The
   // committed `docs/swagger.yaml` is generated from this same config via

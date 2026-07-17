@@ -22,6 +22,7 @@ import { unlink } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { Game, GameDocument, GameStatus, ParticipantStatus } from './schemas/game.schema';
 import { CreateGameDto, InitialPlayerDto } from './dto/create-game.dto';
+import { SetPositionDto } from './dto/set-position.dto';
 import { UpdateGameDto } from './dto/update-game.dto';
 import { JoinGameDto } from './dto/join-game.dto';
 import { ListGamesDto } from './dto/list-games.dto';
@@ -60,10 +61,11 @@ export class GamesService {
       throw new BadRequestException('start_time must be in the future');
     }
 
-    // Guest players the host pre-adds. They may not have an account and are kept
-    // off `gameData` (not a Game field) — they seed the roster below. Blank
-    // names are dropped; a blank position is treated as unset.
-    const { players = [], ...gameData } = dto;
+    // Guest players the host pre-adds, plus the host's own optional position.
+    // These are kept off `gameData` (not Game fields) — they shape the roster
+    // below. Blank names are dropped; a blank position is treated as unset.
+    const { players = [], host_position, ...gameData } = dto;
+    const hostPosition = host_position?.trim() || undefined;
     const guests = players
       .map((p) => ({ name: p.name?.trim() ?? '', position: p.position?.trim() || undefined }))
       .filter((g) => g.name.length > 0);
@@ -82,7 +84,11 @@ export class GamesService {
       // stock banner (a generic default for unrecognized sports).
       photo_url: dto.photo_url?.trim() || bannerForSport(dto.sport),
       participants: [
-        { user: hostId, status: ParticipantStatus.Joined },
+        {
+          user: hostId,
+          status: ParticipantStatus.Joined,
+          ...(hostPosition ? { position: hostPosition } : {}),
+        },
         ...guests.map((g) => ({
           name: g.name,
           status: ParticipantStatus.Joined,
@@ -369,6 +375,33 @@ return game;
 
     game.participants.splice(index, 1);
     this.recomputeStatus(game);
+    return game.save();
+  }
+
+  /**
+   * Set (or clear) the authenticated caller's own position on a game they're
+   * actively on — the host or any joined registered player. Sending an empty
+   * position clears it. Does not affect the roster count or status.
+   */
+  async setMyPosition(
+    id: string,
+    userId: string,
+    payload: SetPositionDto,
+  ): Promise<GameDocument> {
+    const dto = await validateDto(SetPositionDto, payload);
+    const game = await this.findByIdOrFail(id);
+    this.assertNotTerminal(game);
+
+    const participant = game.participants.find(
+      (p) =>
+        p.user?.toString() === userId &&
+        p.status === ParticipantStatus.Joined,
+    );
+    if (!participant) {
+      throw new BadRequestException('You are not on this game roster');
+    }
+
+    participant.position = dto.position?.trim() || undefined;
     return game.save();
   }
 

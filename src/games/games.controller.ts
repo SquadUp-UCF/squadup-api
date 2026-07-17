@@ -43,6 +43,7 @@ import {
 } from '@nestjs/swagger';
 import { GamesService } from './games.service';
 import { CreateGameDto, InitialPlayerDto } from './dto/create-game.dto';
+import { SetPositionDto } from './dto/set-position.dto';
 import { UpdateGameDto } from './dto/update-game.dto';
 import { JoinGameDto } from './dto/join-game.dto';
 import { ListGamesDto } from './dto/list-games.dto';
@@ -200,6 +201,18 @@ export class GamesController {
     @Param('index', ParseIntPipe) index: number,
   ) {
     return this.gamesService.removeGuest(id, user.id, index);
+  }
+
+  @Patch(':id/position')
+  @ApiOperation({ summary: "Set your own position on a game you're on" })
+  @ApiResponse({ status: 200, description: 'The updated game.' })
+  @ApiResponse({ status: 400, description: 'Not on the roster, or the game is terminal.' })
+  setMyPosition(
+    @CurrentUser() user: UserDocument,
+    @Param('id') id: string,
+    @Body() dto: SetPositionDto,
+  ) {
+    return this.gamesService.setMyPosition(id, user.id, dto);
   }
 
   @Post(':id/cancel')
