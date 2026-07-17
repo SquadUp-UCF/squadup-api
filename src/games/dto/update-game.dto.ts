@@ -6,6 +6,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsDateString,
+  IsEnum,
   IsInt,
   IsLatitude,
   IsLongitude,
@@ -14,6 +15,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { GameSkillLevel } from '../schemas/game.schema';
 
 export class UpdateGameDto {
   @ApiPropertyOptional({ example: 'soccer' })
@@ -48,6 +50,11 @@ export class UpdateGameDto {
   @IsOptional()
   @IsLongitude()
   longitude?: number;
+
+  @ApiPropertyOptional({ enum: GameSkillLevel })
+  @IsOptional()
+  @IsEnum(GameSkillLevel)
+  skill_level?: GameSkillLevel;
 
   @ApiPropertyOptional({ example: 6 })
   @IsOptional()

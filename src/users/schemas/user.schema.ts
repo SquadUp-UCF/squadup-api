@@ -89,6 +89,11 @@ export class User {
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Game' }], default: [] })
   games_joined: Types.ObjectId[];
 
+  // Games the user bookmarked ("saved") to follow without joining the roster.
+  // Distinct from games_joined: saving never affects a game's headcount.
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Game' }], default: [] })
+  saved_games: Types.ObjectId[];
+
   // Soft-delete marker. When set, the account is treated as deleted (login
   // blocked) but the document is retained.
   @Prop({ type: Date, default: null })

@@ -23,6 +23,18 @@ export enum GameStatus {
   Cancelled = 'cancelled',
 }
 
+/**
+ * Target skill level for a game, so players can find matches that fit them.
+ * `all` (the default) means the host welcomes any level; the others mirror the
+ * per-user skill vocabulary used elsewhere in the product.
+ */
+export enum GameSkillLevel {
+  All = 'all',
+  Beginner = 'beginner',
+  Intermediate = 'intermediate',
+  Pro = 'pro',
+}
+
 /** State of a single player on a game's roster. */
 export enum ParticipantStatus {
   Joined = 'joined',
@@ -112,6 +124,14 @@ export class Game {
     default: GameStatus.Open,
   })
   status: GameStatus;
+
+  // Target skill level for the game. Defaults to `all` (open to any level).
+  @Prop({
+    type: String,
+    enum: GameSkillLevel,
+    default: GameSkillLevel.All,
+  })
+  skill_level: GameSkillLevel;
 
   @Prop({ type: [ParticipantSchema], default: [] })
   participants: Participant[];

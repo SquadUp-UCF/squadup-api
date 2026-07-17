@@ -212,6 +212,49 @@ paths:
           description: Picture removed.
       tags: *ref_1
       security: *ref_2
+  /api/users/me/saved-games:
+    get:
+      operationId: UsersController_getSavedGames
+      summary: List the games the user has saved
+      parameters: []
+      responses:
+        '200':
+          description: The saved games (full documents).
+      tags: *ref_1
+      security: *ref_2
+  /api/users/me/saved-games/{gameId}:
+    post:
+      operationId: UsersController_saveGame
+      summary: Save (bookmark) a game without joining it
+      parameters:
+        - name: gameId
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Updated profile with the game saved.
+        '400':
+          description: Invalid game id.
+      tags: *ref_1
+      security: *ref_2
+    delete:
+      operationId: UsersController_unsaveGame
+      summary: Remove a game from the saved list
+      parameters:
+        - name: gameId
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Updated profile with the game unsaved.
+        '400':
+          description: Invalid game id.
+      tags: *ref_1
+      security: *ref_2
   /api/users/username-available:
     get:
       operationId: UsersController_usernameAvailable
@@ -283,6 +326,16 @@ paths:
               - locked
               - completed
               - cancelled
+            type: string
+        - name: skill_level
+          required: false
+          in: query
+          schema:
+            enum:
+              - all
+              - beginner
+              - intermediate
+              - pro
             type: string
         - name: upcoming
           required: false
@@ -818,6 +871,17 @@ components:
           description: >-
             Banner image URL. When omitted, defaults to the sport's stock
             banner.
+        skill_level:
+          type: string
+          enum:
+            - all
+            - beginner
+            - intermediate
+            - pro
+          default: all
+          description: >-
+            Target skill level. Defaults to `all` (open to any level) when
+            omitted.
         players:
           example:
             - name: Alex Rivera
@@ -866,6 +930,13 @@ components:
         longitude:
           type: number
           example: -74.006
+        skill_level:
+          type: string
+          enum:
+            - all
+            - beginner
+            - intermediate
+            - pro
         min_players:
           type: number
           example: 6

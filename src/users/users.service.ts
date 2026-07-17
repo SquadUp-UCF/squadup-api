@@ -6,12 +6,13 @@
  * view of a user for other players.
  */
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { unlink } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { AccountStatus, User, UserDocument } from './schemas/user.schema';
@@ -280,6 +281,62 @@ export class UsersService {
     await this.userModel
       .updateOne({ _id: userId }, { $pull: { games_created: gameId } })
       .exec();
+  }
+
+  /**
+   * Bookmark a game for the user ("save"). Idempotent via `$addToSet`, so
+   * saving an already-saved game is a no-op. Returns the updated user so the
+   * caller sees the new `saved_games`. Saving never touches the game's roster.
+   */
+  async saveGame(userId: string, gameId: string): Promise<UserDocument> {
+    if (!Types.ObjectId.isValid(gameId)) {
+      throw new BadRequestException('Invalid game id');
+    }
+    const updated = await this.userModel
+      .findOneAndUpdate(
+        { _id: userId, deleted_at: null },
+        { $addToSet: { saved_games: gameId } },
+        { new: true },
+      )
+      .exec();
+    if (!updated) {
+      throw new NotFoundException('User not found');
+    }
+    return updated;
+  }
+
+  /** Remove a game from the user's saved list. Idempotent via `$pull`. */
+  async unsaveGame(userId: string, gameId: string): Promise<UserDocument> {
+    if (!Types.ObjectId.isValid(gameId)) {
+      throw new BadRequestException('Invalid game id');
+    }
+    const updated = await this.userModel
+      .findOneAndUpdate(
+        { _id: userId, deleted_at: null },
+        { $pull: { saved_games: gameId } },
+        { new: true },
+      )
+      .exec();
+    if (!updated) {
+      throw new NotFoundException('User not found');
+    }
+    return updated;
+  }
+
+  /**
+   * The full game documents the user has saved, newest-saved first. Games that
+   * were since deleted populate as null and are filtered out, so a stale
+   * bookmark never surfaces a broken entry.
+   */
+  async getSavedGames(userId: string): Promise<unknown[]> {
+    const user = await this.userModel
+      .findOne({ _id: userId, deleted_at: null })
+      .populate('saved_games')
+      .exec();
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    return (user.saved_games as unknown[]).filter((g) => g != null).reverse();
   }
 
   /** Fetch the public view of an active user, or 404 if missing/deleted. */

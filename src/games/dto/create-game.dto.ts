@@ -8,6 +8,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsDateString,
+  IsEnum,
   IsInt,
   IsLatitude,
   IsLongitude,
@@ -17,6 +18,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { GameSkillLevel } from '../schemas/game.schema';
 
 /**
  * An initial roster entry the host pre-adds — a guest who may not have an
@@ -87,6 +89,16 @@ export class CreateGameDto {
   @IsString()
   @MaxLength(500)
   photo_url?: string;
+
+  @ApiPropertyOptional({
+    enum: GameSkillLevel,
+    default: GameSkillLevel.All,
+    description:
+      "Target skill level. Defaults to `all` (open to any level) when omitted.",
+  })
+  @IsOptional()
+  @IsEnum(GameSkillLevel)
+  skill_level?: GameSkillLevel;
 
   @ApiPropertyOptional({
     type: [InitialPlayerDto],

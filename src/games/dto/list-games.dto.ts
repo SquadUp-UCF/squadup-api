@@ -8,7 +8,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsEnum, IsOptional, IsString } from 'class-validator';
-import { GameStatus } from '../schemas/game.schema';
+import { GameSkillLevel, GameStatus } from '../schemas/game.schema';
 
 export class ListGamesDto {
   @ApiPropertyOptional({ example: 'soccer' })
@@ -20,6 +20,11 @@ export class ListGamesDto {
   @IsOptional()
   @IsEnum(GameStatus)
   status?: GameStatus;
+
+  @ApiPropertyOptional({ enum: GameSkillLevel })
+  @IsOptional()
+  @IsEnum(GameSkillLevel)
+  skill_level?: GameSkillLevel;
 
   @ApiPropertyOptional({
     default: true,

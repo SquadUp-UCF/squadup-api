@@ -121,6 +121,9 @@ export class GamesService {
     if (dto.status) {
       query.status = dto.status;
     }
+    if (dto.skill_level) {
+      query.skill_level = dto.skill_level;
+    }
     if (dto.upcoming !== false) {
       query.start_time = { $gt: new Date() };
     }

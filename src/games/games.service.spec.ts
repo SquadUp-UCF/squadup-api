@@ -2,7 +2,7 @@ import { Test } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { GamesService } from './games.service';
-import { Game, GameStatus, ParticipantStatus } from './schemas/game.schema';
+import { Game, GameSkillLevel, GameStatus, ParticipantStatus } from './schemas/game.schema';
 import { MyGamesRole } from './dto/my-games.dto';
 import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -252,6 +252,17 @@ describe('GamesService', () => {
       await service.findMany({ upcoming: false });
 
       expect(model.find).toHaveBeenCalledWith({});
+    });
+
+    it('filters by skill_level when provided', async () => {
+      const stub = queryStub([]);
+      model.find.mockReturnValue(stub);
+
+      await service.findMany({ skill_level: GameSkillLevel.Beginner, upcoming: false });
+
+      expect(model.find).toHaveBeenCalledWith({
+        skill_level: GameSkillLevel.Beginner,
+      });
     });
   });
 

@@ -354,4 +354,65 @@ describe('UsersService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
+
+  describe('saved games', () => {
+    const gameId = '507f1f77bcf86cd799439011';
+
+    it('saves a game with $addToSet and returns the updated user', async () => {
+      model.findOneAndUpdate.mockReturnValue(
+        queryStub({ id: 'user-id', saved_games: [gameId] }),
+      );
+
+      const result = await service.saveGame('user-id', gameId);
+
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: 'user-id', deleted_at: null },
+        { $addToSet: { saved_games: gameId } },
+        { new: true },
+      );
+      expect(result.saved_games).toContain(gameId);
+    });
+
+    it('unsaves a game with $pull', async () => {
+      model.findOneAndUpdate.mockReturnValue(
+        queryStub({ id: 'user-id', saved_games: [] }),
+      );
+
+      await service.unsaveGame('user-id', gameId);
+
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: 'user-id', deleted_at: null },
+        { $pull: { saved_games: gameId } },
+        { new: true },
+      );
+    });
+
+    it('rejects an invalid game id before touching the database', async () => {
+      await expect(service.saveGame('user-id', 'nope')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('throws 404 when saving for a missing/deleted user', async () => {
+      model.findOneAndUpdate.mockReturnValue(queryStub(null));
+      await expect(service.saveGame('gone', gameId)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('lists saved games newest-first and drops deleted ones', async () => {
+      const populated = {
+        saved_games: [{ id: 'a' }, null, { id: 'b' }],
+      };
+      model.findOne.mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue(populated),
+      });
+
+      const result = await service.getSavedGames('user-id');
+
+      expect(result).toEqual([{ id: 'b' }, { id: 'a' }]);
+    });
+  });
 });

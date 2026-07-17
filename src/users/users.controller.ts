@@ -11,6 +11,7 @@ import {
   Controller,
   Get,
   Patch,
+  Post,
   Put,
   Delete,
   Body,
@@ -122,6 +123,36 @@ export class UsersController {
     await this.usersService.softDelete(user.id);
   }
 
+
+  @Get('me/saved-games')
+  @ApiOperation({ summary: 'List the games the user has saved' })
+  @ApiResponse({ status: 200, description: 'The saved games (full documents).' })
+  getSavedGames(@CurrentUser() user: UserDocument) {
+    return this.usersService.getSavedGames(user.id);
+  }
+
+  @Post('me/saved-games/:gameId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Save (bookmark) a game without joining it' })
+  @ApiResponse({ status: 200, description: 'Updated profile with the game saved.' })
+  @ApiResponse({ status: 400, description: 'Invalid game id.' })
+  saveGame(
+    @CurrentUser() user: UserDocument,
+    @Param('gameId') gameId: string,
+  ) {
+    return this.usersService.saveGame(user.id, gameId);
+  }
+
+  @Delete('me/saved-games/:gameId')
+  @ApiOperation({ summary: 'Remove a game from the saved list' })
+  @ApiResponse({ status: 200, description: 'Updated profile with the game unsaved.' })
+  @ApiResponse({ status: 400, description: 'Invalid game id.' })
+  unsaveGame(
+    @CurrentUser() user: UserDocument,
+    @Param('gameId') gameId: string,
+  ) {
+    return this.usersService.unsaveGame(user.id, gameId);
+  }
 
   @Get('username-available')
   async usernameAvailable(@Query('username') username: string) {
