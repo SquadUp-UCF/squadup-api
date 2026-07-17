@@ -22,6 +22,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseIntPipe,
   Patch,
   Post,
   Put,
@@ -41,7 +42,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { GamesService } from './games.service';
-import { CreateGameDto } from './dto/create-game.dto';
+import { CreateGameDto, InitialPlayerDto } from './dto/create-game.dto';
 import { UpdateGameDto } from './dto/update-game.dto';
 import { JoinGameDto } from './dto/join-game.dto';
 import { ListGamesDto } from './dto/list-games.dto';
@@ -172,6 +173,33 @@ export class GamesController {
   @ApiResponse({ status: 400, description: 'Host cannot leave / not on roster.' })
   leave(@CurrentUser() user: UserDocument, @Param('id') id: string) {
     return this.gamesService.leave(id, user.id);
+  }
+
+  @Post(':id/guests')
+  @ApiOperation({ summary: 'Add a guest player to the roster (host only)' })
+  @ApiResponse({ status: 201, description: 'The updated game.' })
+  @ApiResponse({ status: 400, description: 'Game full/started/terminal, or invalid guest.' })
+  @ApiResponse({ status: 403, description: 'Only the host can add guests.' })
+  addGuest(
+    @CurrentUser() user: UserDocument,
+    @Param('id') id: string,
+    @Body() dto: InitialPlayerDto,
+  ) {
+    return this.gamesService.addGuest(id, user.id, dto);
+  }
+
+  @Delete(':id/guests/:index')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Remove a guest from the roster by index (host only)' })
+  @ApiResponse({ status: 200, description: 'The updated game.' })
+  @ApiResponse({ status: 400, description: 'No guest at that index.' })
+  @ApiResponse({ status: 403, description: 'Only the host can remove guests.' })
+  removeGuest(
+    @CurrentUser() user: UserDocument,
+    @Param('id') id: string,
+    @Param('index', ParseIntPipe) index: number,
+  ) {
+    return this.gamesService.removeGuest(id, user.id, index);
   }
 
   @Post(':id/cancel')

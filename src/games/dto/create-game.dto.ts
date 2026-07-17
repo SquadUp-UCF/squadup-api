@@ -3,7 +3,10 @@
  * `min_players` must not exceed `max_players`.
  */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsDateString,
   IsInt,
   IsLatitude,
@@ -12,7 +15,26 @@ import {
   IsString,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
+
+/**
+ * An initial roster entry the host pre-adds — a guest who may not have an
+ * account. `position`, when given, is the (sport-specific, free-text) spot they
+ * play.
+ */
+export class InitialPlayerDto {
+  @ApiProperty({ example: 'Sam Lee' })
+  @IsString()
+  @MaxLength(100)
+  name: string;
+
+  @ApiPropertyOptional({ example: 'Goalkeeper' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  position?: string;
+}
 
 export class CreateGameDto {
   @ApiProperty({ example: 'soccer' })
@@ -65,4 +87,19 @@ export class CreateGameDto {
   @IsString()
   @MaxLength(500)
   photo_url?: string;
+
+  @ApiPropertyOptional({
+    type: [InitialPlayerDto],
+    example: [{ name: 'Alex Rivera', position: 'Forward' }, { name: 'Sam Lee' }],
+    description:
+      'Initial roster of players to pre-add. These are guests who may not have ' +
+      'an account; each counts toward min/max like any player and may carry an ' +
+      'optional position. The host is added automatically and should not be listed here.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => InitialPlayerDto)
+  players?: InitialPlayerDto[];
 }

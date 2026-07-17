@@ -83,6 +83,59 @@ paths:
         '400':
           description: Invalid or expired code.
       tags: *ref_0
+  /api/auth/forgot-password:
+    post:
+      operationId: AuthController_forgotPassword
+      summary: Email a single-use password-reset link
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgotPasswordDto'
+      responses:
+        '200':
+          description: Reset link sent if the email exists.
+        '502':
+          description: The reset email could not be sent.
+      tags: *ref_0
+  /api/auth/reset-password:
+    post:
+      operationId: AuthController_resetPassword
+      summary: Redeem a reset link and set a new password
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordDto'
+      responses:
+        '200':
+          description: Password reset successfully.
+        '400':
+          description: Invalid or expired token, or a rejected password.
+      tags: *ref_0
+  /api/auth/change-password:
+    patch:
+      operationId: AuthController_changePassword
+      summary: Change the authenticated user's password
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordDto'
+      responses:
+        '200':
+          description: Password changed successfully.
+        '400':
+          description: Current password incorrect, or new password rejected.
+      tags: *ref_0
+      security:
+        - bearer: []
   /api/users/me:
     get:
       operationId: UsersController_getMe
@@ -328,10 +381,45 @@ paths:
           description: Only the host can delete.
       tags: *ref_3
       security: *ref_4
-  /api/games/{id}/join:
-    post:
-      operationId: GamesController_join
-      summary: Join a game
+  /api/games/{id}/photo:
+    put:
+      operationId: GamesController_uploadPhoto
+      summary: Upload or replace a game's banner (host only)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - photo
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                  description: JPEG, PNG, or WebP image, 5 MB max.
+      responses:
+        '200':
+          description: Updated game with banner path.
+        '400':
+          description: Missing file or unsupported type.
+        '403':
+          description: Only the host can set the banner.
+        '413':
+          description: Image exceeds the 5 MB limit.
+      tags: *ref_3
+      security: *ref_4
+    delete:
+      operationId: GamesController_removePhoto
+      summary: >-
+        Remove a game's banner, reverting to the sport's stock default (host
+        only)
       parameters:
         - name: id
           required: true
@@ -340,9 +428,34 @@ paths:
             type: string
       responses:
         '200':
+          description: Updated game with the stock banner restored.
+        '403':
+          description: Only the host can remove the banner.
+      tags: *ref_3
+      security: *ref_4
+  /api/games/{id}/join:
+    post:
+      operationId: GamesController_join
+      summary: Join a game, optionally for a party of more than one
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinGameDto'
+      responses:
+        '200':
           description: The joined game.
         '400':
-          description: Game full/started or already joined.
+          description: >-
+            Game full/started, already joined, or the party doesn't fit the
+            remaining spots.
       tags: *ref_3
       security: *ref_4
   /api/games/{id}/leave:
@@ -360,6 +473,55 @@ paths:
           description: The updated game.
         '400':
           description: Host cannot leave / not on roster.
+      tags: *ref_3
+      security: *ref_4
+  /api/games/{id}/guests:
+    post:
+      operationId: GamesController_addGuest
+      summary: Add a guest player to the roster (host only)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InitialPlayerDto'
+      responses:
+        '201':
+          description: The updated game.
+        '400':
+          description: Game full/started/terminal, or invalid guest.
+        '403':
+          description: Only the host can add guests.
+      tags: *ref_3
+      security: *ref_4
+  /api/games/{id}/guests/{index}:
+    delete:
+      operationId: GamesController_removeGuest
+      summary: Remove a guest from the roster by index (host only)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+        - name: index
+          required: true
+          in: path
+          schema:
+            type: number
+      responses:
+        '200':
+          description: The updated game.
+        '400':
+          description: No guest at that index.
+        '403':
+          description: Only the host can remove guests.
       tags: *ref_3
       security: *ref_4
   /api/games/{id}/cancel:
@@ -521,6 +683,50 @@ components:
       required:
         - email
         - code
+    ForgotPasswordDto:
+      type: object
+      properties:
+        email:
+          type: string
+          example: alex@ucf.edu
+          description: Must be a UCF email address (@ucf.edu).
+      required:
+        - email
+    ResetPasswordDto:
+      type: object
+      properties:
+        token:
+          type: string
+          example: 3f1a…
+          description: The token from the reset link. Single-use; expires in 1 hour.
+        new_password:
+          type: string
+          example: Passw0rd!
+          minLength: 8
+          maxLength: 20
+          description: >-
+            Password: 8–20 characters, with at least one uppercase letter, one
+            lowercase letter, one number, and one symbol.
+      required:
+        - token
+        - new_password
+    ChangePasswordDto:
+      type: object
+      properties:
+        current_password:
+          type: string
+          example: CurrentPassw0rd!
+        new_password:
+          type: string
+          example: N3wPassw0rd!
+          minLength: 8
+          maxLength: 20
+          description: >-
+            Password: 8–20 characters, with at least one uppercase letter, one
+            lowercase letter, one number, and one symbol.
+      required:
+        - current_password
+        - new_password
     UpdateProfileDto:
       type: object
       properties:
@@ -542,6 +748,17 @@ components:
             basketball: PG
           additionalProperties:
             type: string
+    InitialPlayerDto:
+      type: object
+      properties:
+        name:
+          type: string
+          example: Sam Lee
+        position:
+          type: string
+          example: Goalkeeper
+      required:
+        - name
     CreateGameDto:
       type: object
       properties:
@@ -578,6 +795,19 @@ components:
           description: >-
             Banner image URL. When omitted, defaults to the sport's stock
             banner.
+        players:
+          example:
+            - name: Alex Rivera
+              position: Forward
+            - name: Sam Lee
+          description: >-
+            Initial roster of players to pre-add. These are guests who may not
+            have an account; each counts toward min/max like any player and may
+            carry an optional position. The host is added automatically and
+            should not be listed here.
+          type: array
+          items:
+            $ref: '#/components/schemas/InitialPlayerDto'
       required:
         - sport
         - location
@@ -619,6 +849,17 @@ components:
           description: >-
             Banner image URL. Changing the sport re-points a stock banner at the
             new sport; a custom image is kept.
+    JoinGameDto:
+      type: object
+      properties:
+        party_size:
+          type: number
+          example: 3
+          minimum: 1
+          maximum: 20
+          description: >-
+            Total headcount this join represents, including the caller. Rejected
+            if the group would exceed the remaining spots.
     RegisterDeviceDto:
       type: object
       properties:

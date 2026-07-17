@@ -21,7 +21,7 @@ import { Model } from 'mongoose';
 import { unlink } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { Game, GameDocument, GameStatus, ParticipantStatus } from './schemas/game.schema';
-import { CreateGameDto } from './dto/create-game.dto';
+import { CreateGameDto, InitialPlayerDto } from './dto/create-game.dto';
 import { UpdateGameDto } from './dto/update-game.dto';
 import { JoinGameDto } from './dto/join-game.dto';
 import { ListGamesDto } from './dto/list-games.dto';
@@ -60,14 +60,43 @@ export class GamesService {
       throw new BadRequestException('start_time must be in the future');
     }
 
+    // Guest players the host pre-adds. They may not have an account and are kept
+    // off `gameData` (not a Game field) — they seed the roster below. Blank
+    // names are dropped; a blank position is treated as unset.
+    const { players = [], ...gameData } = dto;
+    const guests = players
+      .map((p) => ({ name: p.name?.trim() ?? '', position: p.position?.trim() || undefined }))
+      .filter((g) => g.name.length > 0);
+
+    // The host (1) plus each guest (party_size 1) must fit the max roster.
+    if (1 + guests.length > dto.max_players) {
+      throw new BadRequestException(
+        `Too many initial players for a max roster of ${dto.max_players}`,
+      );
+    }
+
     const game = await this.gameModel.create({
-      ...dto,
+      ...gameData,
       host: hostId,
       // Banner: the host's own image if they supplied one, else the sport's
       // stock banner (a generic default for unrecognized sports).
       photo_url: dto.photo_url?.trim() || bannerForSport(dto.sport),
-      participants: [{ user: hostId, status: ParticipantStatus.Joined }],
+      participants: [
+        { user: hostId, status: ParticipantStatus.Joined },
+        ...guests.map((g) => ({
+          name: g.name,
+          status: ParticipantStatus.Joined,
+          ...(g.position ? { position: g.position } : {}),
+        })),
+      ],
     });
+
+    // A pre-filled roster can already satisfy min/max, so reflect that instead
+    // of always starting `open`.
+    if (guests.length > 0) {
+      this.recomputeStatus(game);
+      await game.save();
+    }
 
     await this.usersService.addCreatedGame(hostId, game.id);
     return game;
@@ -177,7 +206,7 @@ export class GamesService {
     }
 
     const existing = game.participants.find(
-      (p) => p.user.toString() === userId,
+      (p) => p.user?.toString() === userId,
     );
     if (existing?.status === ParticipantStatus.Joined) {
       throw new BadRequestException('Already joined this game');
@@ -222,8 +251,8 @@ export class GamesService {
     // Notify all participants if status changed
     if (prevStatus !== game.status) {
   const activeParticipants = game.participants
-    .filter(p => p.status === ParticipantStatus.Joined)
-    .map(p => p.user.toString());
+    .filter((p) => p.status === ParticipantStatus.Joined && p.user)
+    .map((p) => p.user!.toString());
 
   const newStatus = game.status as GameStatus;
 
@@ -264,7 +293,7 @@ return game;
 
     const participant = game.participants.find(
       (p) =>
-        p.user.toString() === userId &&
+        p.user?.toString() === userId &&
         p.status === ParticipantStatus.Joined,
     );
     if (!participant) {
@@ -278,6 +307,71 @@ return game;
     return game;
   }
 
+  /**
+   * Host-only: add a guest player (someone who may not have an account) to an
+   * existing game's roster — the same kind of entry the host can seed at
+   * creation. A guest counts toward min/max like any player.
+   */
+  async addGuest(
+    id: string,
+    userId: string,
+    payload: InitialPlayerDto,
+  ): Promise<GameDocument> {
+    const dto = await validateDto(InitialPlayerDto, payload);
+    const game = await this.findByIdOrFail(id);
+    this.assertHost(game, userId);
+    this.assertNotTerminal(game);
+
+    if (game.status === GameStatus.Locked) {
+      throw new BadRequestException('Game is full');
+    }
+    if (game.start_time.getTime() <= Date.now()) {
+      throw new BadRequestException('Game has already started');
+    }
+    if (this.activePartySize(game) >= game.max_players) {
+      throw new BadRequestException('Game is full');
+    }
+
+    const name = dto.name.trim();
+    if (!name) {
+      throw new BadRequestException('Guest name is required');
+    }
+    const position = dto.position?.trim() || undefined;
+
+    game.participants.push({
+      name,
+      status: ParticipantStatus.Joined,
+      ...(position ? { position } : {}),
+    } as unknown as GameDocument['participants'][number]);
+
+    this.recomputeStatus(game);
+    return game.save();
+  }
+
+  /**
+   * Host-only: remove a guest from the roster by its index in `participants`.
+   * Only guest entries (no linked `user`) can be removed this way — registered
+   * players leave via `leave`.
+   */
+  async removeGuest(
+    id: string,
+    userId: string,
+    index: number,
+  ): Promise<GameDocument> {
+    const game = await this.findByIdOrFail(id);
+    this.assertHost(game, userId);
+    this.assertNotTerminal(game);
+
+    const participant = game.participants[index];
+    if (!participant || participant.user) {
+      throw new BadRequestException('No guest at that position on the roster');
+    }
+
+    game.participants.splice(index, 1);
+    this.recomputeStatus(game);
+    return game.save();
+  }
+
   async cancel(id: string, userId: string): Promise<GameDocument> {
     const game = await this.findByIdOrFail(id);
     this.assertHost(game, userId);
@@ -288,8 +382,13 @@ return game;
 
     // Notify all participants the game was cancelled
     const activeParticipants = game.participants
-      .filter(p => p.status === ParticipantStatus.Joined && p.user.toString() !== userId)
-      .map(p => p.user.toString());
+      .filter(
+        (p) =>
+          p.status === ParticipantStatus.Joined &&
+          p.user &&
+          p.user.toString() !== userId,
+      )
+      .map((p) => p.user!.toString());
 
     for (const participantId of activeParticipants) {
       this.notificationsService.sendToUser({

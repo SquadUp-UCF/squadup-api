@@ -140,6 +140,81 @@ describe('GamesService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(model.create).not.toHaveBeenCalled();
     });
+
+    it('pre-adds initial guest players by name and recomputes status', async () => {
+      // validCreate is min 2 / max 4; host + 1 guest = 2 → confirmed.
+      const created = makeGame({
+        max_players: 4,
+        status: GameStatus.Open,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { name: 'Sam Lee', status: ParticipantStatus.Joined },
+        ],
+      });
+      model.create.mockResolvedValue(created);
+
+      await service.create('host-id', { ...validCreate, players: [{ name: 'Sam Lee' }] });
+
+      expect(model.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          participants: [
+            { user: 'host-id', status: ParticipantStatus.Joined },
+            { name: 'Sam Lee', status: ParticipantStatus.Joined },
+          ],
+        }),
+      );
+      expect(created.status).toBe(GameStatus.Confirmed);
+      expect(created.save).toHaveBeenCalled();
+    });
+
+    it('pre-adds a guest with a sport-specific position', async () => {
+      const created = makeGame({
+        max_players: 4,
+        status: GameStatus.Open,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { name: 'Sam Lee', position: 'Goalkeeper', status: ParticipantStatus.Joined },
+        ],
+      });
+      model.create.mockResolvedValue(created);
+
+      await service.create('host-id', {
+        ...validCreate,
+        players: [{ name: 'Sam Lee', position: 'Goalkeeper' }],
+      });
+
+      expect(model.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          participants: [
+            { user: 'host-id', status: ParticipantStatus.Joined },
+            { name: 'Sam Lee', status: ParticipantStatus.Joined, position: 'Goalkeeper' },
+          ],
+        }),
+      );
+    });
+
+    it('ignores blank guest names (host only, no roster seeding)', async () => {
+      model.create.mockResolvedValue(makeGame());
+
+      await service.create('host-id', { ...validCreate, players: [{ name: '  ' }, { name: '' }] });
+
+      expect(model.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          participants: [{ user: 'host-id', status: ParticipantStatus.Joined }],
+        }),
+      );
+    });
+
+    it('rejects more initial players than the max roster allows', async () => {
+      await expect(
+        service.create('host-id', {
+          ...validCreate,
+          max_players: 2,
+          players: [{ name: 'Sam' }, { name: 'Alex' }], // host + 2 = 3 > max 2
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(model.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('findMany', () => {
@@ -347,6 +422,95 @@ describe('GamesService', () => {
       await expect(service.leave('game-id', 'u2')).rejects.toBeInstanceOf(
         BadRequestException,
       );
+    });
+  });
+
+  describe('guests', () => {
+    it('lets the host add a guest with a position and recomputes status', async () => {
+      // min 2, max 4, host only (1) — adding one guest reaches min → confirmed.
+      const game = makeGame({ max_players: 4 });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.addGuest('game-id', 'host-id', {
+        name: 'Sam Lee',
+        position: 'Goalkeeper',
+      });
+
+      expect(game.participants).toHaveLength(2);
+      expect(game.participants[1]).toMatchObject({
+        name: 'Sam Lee',
+        position: 'Goalkeeper',
+        status: ParticipantStatus.Joined,
+      });
+      expect(game.status).toBe(GameStatus.Confirmed);
+      expect(game.save).toHaveBeenCalled();
+    });
+
+    it('forbids a non-host from adding a guest', async () => {
+      const game = makeGame();
+      model.findById.mockReturnValue(queryStub(game));
+      await expect(
+        service.addGuest('game-id', 'stranger', { name: 'Sam' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('rejects adding a guest to a full roster', async () => {
+      // max 3, host + 2 already joined → no room.
+      const game = makeGame({
+        max_players: 3,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { user: 'u2', status: ParticipantStatus.Joined },
+          { name: 'G1', status: ParticipantStatus.Joined },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+      await expect(
+        service.addGuest('game-id', 'host-id', { name: 'Late' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('lets the host remove a guest by index', async () => {
+      const game = makeGame({
+        max_players: 4,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { name: 'Sam Lee', status: ParticipantStatus.Joined },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.removeGuest('game-id', 'host-id', 1);
+
+      expect(game.participants).toHaveLength(1);
+      expect(game.participants[0].user).toBe('host-id');
+      expect(game.save).toHaveBeenCalled();
+    });
+
+    it('refuses to remove a registered player via the guest endpoint', async () => {
+      const game = makeGame({
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { user: 'u2', status: ParticipantStatus.Joined },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+      await expect(
+        service.removeGuest('game-id', 'host-id', 1),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('forbids a non-host from removing a guest', async () => {
+      const game = makeGame({
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { name: 'Sam', status: ParticipantStatus.Joined },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+      await expect(
+        service.removeGuest('game-id', 'stranger', 1),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 

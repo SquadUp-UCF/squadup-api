@@ -33,11 +33,26 @@ export enum ParticipantStatus {
  * A player on a game's roster. Stored inline (no own `_id`). Leaving a game
  * flips `status` to `cancelled` rather than removing the entry, so the roster
  * keeps its history; only `joined` participants count toward min/max.
+ *
+ * A participant is either a registered user (`user` set) or a guest the host
+ * pre-added by name (`name` set, no account) — so a host can seed the roster
+ * with people who may not use the app. Exactly one of `user`/`name` is present.
  */
 @Schema({ _id: false })
 export class Participant {
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
-  user: Types.ObjectId;
+  // Set for registered players. Absent for guests (see `name`).
+  @Prop({ type: Types.ObjectId, ref: 'User', required: false })
+  user?: Types.ObjectId;
+
+  // Display name for a guest player with no account. Absent for registered
+  // players (their identity comes from `user`).
+  @Prop({ type: String })
+  name?: string;
+
+  // Optional sport-specific position this player is filling (free text, e.g.
+  // "Goalkeeper"). Currently set for pre-added guests.
+  @Prop({ type: String })
+  position?: string;
 
   @Prop({
     type: String,
