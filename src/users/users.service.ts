@@ -30,6 +30,8 @@ export interface PublicProfile {
   reputation: number;
   is_flaker: boolean;
   account_status: string;
+  skill_levels: Record<string, string>;
+  // Deprecated legacy skill map, exposed only as a read fallback.
   preferred_positions: Record<string, string>;
   games_created: number;
   games_joined: number;
@@ -354,7 +356,8 @@ export class UsersService {
       reputation: user.reputation,
       is_flaker: user.is_flaker,
       account_status: user.account_status,
-      // Mongoose stores this as a Map; expose it as a plain object for JSON.
+      // Mongoose stores these as Maps; expose them as plain objects for JSON.
+      skill_levels: user.skill_levels ? Object.fromEntries(user.skill_levels) : {},
       preferred_positions: user.preferred_positions
         ? Object.fromEntries(user.preferred_positions)
         : {},

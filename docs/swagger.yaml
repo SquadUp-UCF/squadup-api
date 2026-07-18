@@ -816,12 +816,20 @@ components:
           type: string
           example: alex_r
           description: Unique public handle
-        preferred_positions:
+        skill_levels:
           type: object
-          description: Preferred position per sport (one each), keyed by sport.
+          description: Self-reported skill level per sport, keyed by sport.
           example:
-            soccer: GK
-            basketball: PG
+            soccer: Intermediate
+            basketball: Beginner
+          additionalProperties:
+            type: string
+        sport_positions:
+          type: object
+          description: Preferred playing position per sport, keyed by sport.
+          example:
+            soccer: Goalkeeper
+            basketball: Point Guard
           additionalProperties:
             type: string
     InitialPlayerDto:

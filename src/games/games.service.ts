@@ -39,6 +39,11 @@ const TERMINAL_STATUSES: GameStatus[] = [
   GameStatus.Cancelled,
 ];
 
+// How long a game stays in discovery past its start time before it's treated as
+// over and hidden — unless the host ends/cancels it sooner. Four hours covers a
+// long session (double-headers, extra innings) without leaving stale games up.
+const DISCOVERY_GRACE_MS = 4 * 60 * 60 * 1000;
+
 @Injectable()
 export class GamesService {
   constructor(
@@ -125,7 +130,17 @@ export class GamesService {
       query.skill_level = dto.skill_level;
     }
     if (dto.upcoming !== false) {
-      query.start_time = { $gt: new Date() };
+      // A game stays discoverable during and shortly after its slot: it drops
+      // off once it's more than DISCOVERY_GRACE_MS past its start time (a game
+      // that already happened), or as soon as the host ends it (completed) or
+      // cancels it. An explicit `status` filter takes precedence over the
+      // "hide ended games" default.
+      query.start_time = { $gt: new Date(Date.now() - DISCOVERY_GRACE_MS) };
+      if (!dto.status) {
+        query.status = {
+          $nin: [GameStatus.Completed, GameStatus.Cancelled],
+        };
+      }
     }
     return this.gameModel.find(query).sort({ start_time: 1 }).exec();
   }

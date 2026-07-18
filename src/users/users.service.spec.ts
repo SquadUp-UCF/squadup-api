@@ -251,6 +251,7 @@ describe('UsersService', () => {
         reputation: 5,
         is_flaker: false,
         account_status: AccountStatus.Active,
+        skill_levels: {},
         preferred_positions: { soccer: 'GK' },
         games_created: 2,
         games_joined: 1,

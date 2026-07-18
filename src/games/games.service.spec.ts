@@ -254,6 +254,25 @@ describe('GamesService', () => {
       expect(model.find).toHaveBeenCalledWith({});
     });
 
+    it('by default keeps games until 4h past start and hides ended ones', async () => {
+      const stub = queryStub([]);
+      model.find.mockReturnValue(stub);
+
+      const before = Date.now();
+      await service.findMany({});
+      const after = Date.now();
+
+      expect(model.find).toHaveBeenCalledTimes(1);
+      const arg = model.find.mock.calls[0][0];
+      // Cutoff is ~4h in the past (start_time must be after it).
+      const cutoff = (arg.start_time as { $gt: Date }).$gt.getTime();
+      expect(cutoff).toBeGreaterThanOrEqual(before - 4 * 60 * 60 * 1000 - 5);
+      expect(cutoff).toBeLessThanOrEqual(after - 4 * 60 * 60 * 1000 + 5);
+      expect(arg.status).toEqual({
+        $nin: [GameStatus.Completed, GameStatus.Cancelled],
+      });
+    });
+
     it('filters by skill_level when provided', async () => {
       const stub = queryStub([]);
       model.find.mockReturnValue(stub);

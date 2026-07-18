@@ -76,10 +76,22 @@ export class User {
   })
   account_status: AccountStatus;
 
-  // Preferred playing position per sport — one position each, keyed by sport
-  // (e.g. { soccer: 'GK', basketball: 'PG' }). Positions are free text for now.
+  // Self-reported skill level per sport, keyed by sport (e.g.
+  // { soccer: 'Intermediate' }). The canonical skill store. Free text.
+  @Prop({ type: Map, of: String, default: {} })
+  skill_levels: Map<string, string>;
+
+  // Deprecated, read-only legacy skill-level map. No longer written (clients
+  // migrated to `skill_levels`); still returned so old profiles' skill data is
+  // readable as a fallback until it's re-saved under `skill_levels`.
   @Prop({ type: Map, of: String, default: {} })
   preferred_positions: Map<string, string>;
+
+  // Preferred playing position per sport, keyed by sport (e.g.
+  // { soccer: 'Goalkeeper' }). Independent of skill so a player can record both
+  // how good they are and where they play. Free text.
+  @Prop({ type: Map, of: String, default: {} })
+  sport_positions: Map<string, string>;
 
   // Games hosted by this user. Fully wired once the Game schema exists.
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Game' }], default: [] })

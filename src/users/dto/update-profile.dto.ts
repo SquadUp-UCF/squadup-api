@@ -32,12 +32,22 @@ export class UpdateProfileDto {
   username?: string;
 
   @ApiPropertyOptional({
-    description: 'Preferred position per sport (one each), keyed by sport.',
-    example: { soccer: 'GK', basketball: 'PG' },
+    description: 'Self-reported skill level per sport, keyed by sport.',
+    example: { soccer: 'Intermediate', basketball: 'Beginner' },
     type: 'object',
     additionalProperties: { type: 'string' },
   })
   @IsOptional()
   @IsObject()
-  preferred_positions?: Record<string, string>;
+  skill_levels?: Record<string, string>;
+
+  @ApiPropertyOptional({
+    description: 'Preferred playing position per sport, keyed by sport.',
+    example: { soccer: 'Goalkeeper', basketball: 'Point Guard' },
+    type: 'object',
+    additionalProperties: { type: 'string' },
+  })
+  @IsOptional()
+  @IsObject()
+  sport_positions?: Record<string, string>;
 }
