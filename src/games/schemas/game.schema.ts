@@ -66,6 +66,15 @@ export class Participant {
   @Prop({ type: String })
   position?: string;
 
+  // For a guest, the account that put them on the roster — the host who
+  // pre-added them, or the player who brought them along. Without it a guest
+  // can't be traced back to anyone, so a player leaving would strand the
+  // guests they brought on the roster with no way to remove them.
+  // Absent on registered players (they are their own entry) and on guests
+  // created before this field existed.
+  @Prop({ type: Types.ObjectId, ref: 'User', required: false })
+  added_by?: Types.ObjectId;
+
   @Prop({
     type: String,
     enum: ParticipantStatus,

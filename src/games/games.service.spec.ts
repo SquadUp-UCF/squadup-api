@@ -163,7 +163,8 @@ describe('GamesService', () => {
         expect.objectContaining({
           participants: [
             { user: 'host-id', status: ParticipantStatus.Joined },
-            { name: 'Sam Lee', status: ParticipantStatus.Joined },
+            // Attributed to the host, so `leave` can tell whose guest is whose.
+            { name: 'Sam Lee', status: ParticipantStatus.Joined, added_by: 'host-id' },
           ],
         }),
       );
@@ -191,7 +192,12 @@ describe('GamesService', () => {
         expect.objectContaining({
           participants: [
             { user: 'host-id', status: ParticipantStatus.Joined },
-            { name: 'Sam Lee', status: ParticipantStatus.Joined, position: 'Goalkeeper' },
+            {
+              name: 'Sam Lee',
+              status: ParticipantStatus.Joined,
+              added_by: 'host-id',
+              position: 'Goalkeeper',
+            },
           ],
         }),
       );
@@ -446,6 +452,69 @@ describe('GamesService', () => {
       expect(game.participants[1].status).toBe(ParticipantStatus.Cancelled);
       expect(game.status).toBe(GameStatus.Open); // dropped below min_players (2)
       expect(users.removeJoinedGame).toHaveBeenCalledWith('u2', 'game-id');
+    });
+
+    it('takes the guests the leaver brought off the roster with them', async () => {
+      const game = makeGame({
+        max_players: 6,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { name: "host's guest", status: ParticipantStatus.Joined, added_by: 'host-id', joined_at: new Date() },
+          { user: 'u2', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { name: 'u2 guest one', status: ParticipantStatus.Joined, added_by: 'u2', joined_at: new Date() },
+          { name: 'u2 guest two', status: ParticipantStatus.Joined, added_by: 'u2', joined_at: new Date() },
+          { name: 'u3 guest', status: ParticipantStatus.Joined, added_by: 'u3', joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.leave('game-id', 'u2');
+
+      // u2's two guests are gone; everyone else's roster entry survives.
+      expect(game.participants.map((p: any) => p.name ?? p.user)).toEqual([
+        'host-id',
+        "host's guest",
+        'u2',
+        'u3 guest',
+      ]);
+      // The leaver themselves is cancelled rather than removed.
+      expect(game.participants[2].status).toBe(ParticipantStatus.Cancelled);
+    });
+
+    it('leaves guests that predate added_by for the host to clear', async () => {
+      const game = makeGame({
+        max_players: 6,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'u2', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { name: 'unattributed guest', status: ParticipantStatus.Joined, joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.leave('game-id', 'u2');
+
+      expect(game.participants).toHaveLength(3);
+      expect(game.participants[2].name).toBe('unattributed guest');
+    });
+
+    it('frees the spots the departing guests were holding', async () => {
+      const game = makeGame({
+        status: GameStatus.Locked,
+        min_players: 2,
+        max_players: 3,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'u2', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { name: 'u2 guest', status: ParticipantStatus.Joined, added_by: 'u2', joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.leave('game-id', 'u2');
+
+      // Was full at 3/3; the guest leaving with u2 must not keep it locked.
+      expect(game.status).toBe(GameStatus.Open);
     });
 
     it('forbids the host from leaving', async () => {

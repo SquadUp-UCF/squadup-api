@@ -101,6 +101,7 @@ export class GamesService {
         ...guests.map((g) => ({
           name: g.name,
           status: ParticipantStatus.Joined,
+          added_by: hostId,
           ...(g.position ? { position: g.position } : {}),
         })),
       ],
@@ -327,8 +328,10 @@ export class GamesService {
         status: ParticipantStatus.Joined,
         joined_at: new Date(),
         party_size: 1,
+        added_by: userId,
         ...(g.position ? { position: g.position } : {}),
-      } as GameDocument['participants'][number]);
+        // Mongoose casts the id strings on save, as with `user` above.
+      } as unknown as GameDocument['participants'][number]);
     }
 
     const prevStatus = game.status;
@@ -398,6 +401,20 @@ return game;
     }
 
     participant.status = ParticipantStatus.Cancelled;
+
+    // Guests leave with whoever brought them — they have no account of their
+    // own, and only the host can remove a guest, so leaving them behind would
+    // strand them on the roster taking up spots nobody can free. Dropped
+    // outright rather than cancelled: unlike a player, a guest entry carries
+    // no history worth keeping. Guests predating `added_by` can't be
+    // attributed and so stay for the host to clear.
+    for (let i = game.participants.length - 1; i >= 0; i--) {
+      const p = game.participants[i];
+      if (!p.user && p.added_by?.toString() === userId) {
+        game.participants.splice(i, 1);
+      }
+    }
+
     this.recomputeStatus(game);
     await game.save();
     await this.usersService.removeJoinedGame(userId, game.id);
@@ -438,6 +455,7 @@ return game;
     game.participants.push({
       name,
       status: ParticipantStatus.Joined,
+      added_by: userId,
       ...(position ? { position } : {}),
     } as unknown as GameDocument['participants'][number]);
 
