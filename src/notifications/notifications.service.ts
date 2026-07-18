@@ -70,13 +70,47 @@ export class NotificationsService {
   }): Promise<void> {
     const tokens = await this.getDeviceTokens(params.userId);
 
-    await this.notificationModel.create({
-      userId: new Types.ObjectId(params.userId),
-      type: params.type,
-      title: params.title,
-      body: params.body,
-      gameId: params.gameId ? new Types.ObjectId(params.gameId) : null,
-    });
+    const userId = new Types.ObjectId(params.userId);
+    const gameId = params.gameId ? new Types.ObjectId(params.gameId) : null;
+    const now = new Date();
+
+    // Repeat events of the same kind about the same game collapse into the
+    // single unread row rather than stacking up — three people joining reads as
+    // one "someone joined" the host hasn't looked at yet, not three identical
+    // lines. Once the row has been read, the next event starts a fresh one.
+    //
+    // Everything is written through `$set` (with the timestamps plugin off) so
+    // an upsert can own `createdAt`: leaving it to `$setOnInsert` would collide
+    // with the `$set` and Mongo would reject the whole update.
+    const collapsible = gameId !== null;
+    if (collapsible) {
+      await this.notificationModel
+        .findOneAndUpdate(
+          { userId, type: params.type, gameId, read: false },
+          {
+            $set: {
+              userId,
+              type: params.type,
+              gameId,
+              title: params.title,
+              body: params.body,
+              read: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+          },
+          { upsert: true, new: true, timestamps: false },
+        )
+        .exec();
+    } else {
+      await this.notificationModel.create({
+        userId,
+        type: params.type,
+        title: params.title,
+        body: params.body,
+        gameId,
+      });
+    }
 
     if (!this.pushEnabled) return;
 

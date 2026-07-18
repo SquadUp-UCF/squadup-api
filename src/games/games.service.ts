@@ -189,6 +189,16 @@ export class GamesService {
     this.assertNotTerminal(game);
 
     const prevPhoto = game.photo_url;
+    // Snapshot the details a player plans around, so an edit to any of them can
+    // be announced to the roster below. Read before Object.assign, and compared
+    // against the DTO rather than the doc (start_time is still an ISO string
+    // in memory until Mongoose casts it on save).
+    const before = {
+      sport: game.sport,
+      location: game.location,
+      start_time: game.start_time?.getTime(),
+    };
+
     Object.assign(game, dto);
 
     // Keep the banner in step with the sport when it's still a stock default
@@ -208,7 +218,49 @@ export class GamesService {
     }
 
     this.recomputeStatus(game);
-    return game.save();
+    const saved = await game.save();
+
+    const changes: string[] = [];
+    if (dto.start_time !== undefined && new Date(dto.start_time).getTime() !== before.start_time) {
+      changes.push('time');
+    }
+    if (dto.location !== undefined && dto.location !== before.location) {
+      changes.push('location');
+    }
+    if (dto.sport !== undefined && dto.sport !== before.sport) {
+      changes.push('sport');
+    }
+
+    // Only the details a player plans around are worth interrupting them for —
+    // a description or banner tweak isn't. The host made the edit, so they're
+    // skipped even if they're on their own roster.
+    if (changes.length > 0) {
+      const summary =
+        changes.length === 1
+          ? changes[0]
+          : `${changes.slice(0, -1).join(', ')} and ${changes[changes.length - 1]}`;
+
+      const roster = saved.participants
+        .filter(
+          (p) =>
+            p.status === ParticipantStatus.Joined &&
+            p.user &&
+            p.user.toString() !== userId,
+        )
+        .map((p) => p.user!.toString());
+
+      for (const participantId of roster) {
+        this.notificationsService.sendToUser({
+          userId: participantId,
+          type: NotificationType.GameUpdated,
+          title: 'Game updated',
+          body: `The ${before.sport} game you joined changed its ${summary}.`,
+          gameId: saved.id,
+        }).catch(() => {});
+      }
+    }
+
+    return saved;
   }
 
   /**

@@ -6,6 +6,7 @@ import { Game, GameSkillLevel, GameStatus, ParticipantStatus } from './schemas/g
 import { MyGamesRole } from './dto/my-games.dto';
 import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/schemas/notification.schema';
 import { bannerForSport } from './sport-banners';
 
 /** Query stub whose `.exec()` resolves to `result`; `.sort()` chains. */
@@ -645,6 +646,87 @@ describe('GamesService', () => {
       model.findById.mockReturnValue(queryStub(game));
       await service.update('game-id', 'host-id', { sport: 'tennis' });
       expect(game.photo_url).toBe(custom);
+    });
+
+    it('notifies the roster (but not the editing host) when the time changes', async () => {
+      const game = makeGame({
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'player-1', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'player-2', status: ParticipantStatus.Cancelled, joined_at: new Date() },
+          { name: 'Guest', status: ParticipantStatus.Joined, joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.update('game-id', 'host-id', {
+        start_time: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(),
+      });
+
+      // Only the joined, registered, non-host player is reachable.
+      expect(notifications.sendToUser).toHaveBeenCalledTimes(1);
+      expect(notifications.sendToUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'player-1',
+          type: NotificationType.GameUpdated,
+          gameId: 'game-id',
+          body: 'The soccer game you joined changed its time.',
+        }),
+      );
+    });
+
+    it('names every changed detail in one notification', async () => {
+      const game = makeGame({
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'player-1', status: ParticipantStatus.Joined, joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.update('game-id', 'host-id', {
+        start_time: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(),
+        location: 'Field 7',
+        sport: 'tennis',
+      });
+
+      expect(notifications.sendToUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: 'The soccer game you joined changed its time, location and sport.',
+        }),
+      );
+    });
+
+    it('stays quiet when the edit only touches cosmetic fields', async () => {
+      const game = makeGame({
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'player-1', status: ParticipantStatus.Joined, joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.update('game-id', 'host-id', { description: 'Bring water' });
+
+      expect(notifications.sendToUser).not.toHaveBeenCalled();
+    });
+
+    it('stays quiet when an edit re-sends the same values', async () => {
+      const game = makeGame({
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'player-1', status: ParticipantStatus.Joined, joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.update('game-id', 'host-id', {
+        location: game.location,
+        sport: game.sport,
+        start_time: game.start_time.toISOString(),
+      });
+
+      expect(notifications.sendToUser).not.toHaveBeenCalled();
     });
   });
 

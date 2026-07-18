@@ -10,13 +10,17 @@
  */
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { getModelToken } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { AccountStatus, User } from '../src/users/schemas/user.schema';
 
 describe('SquadUp API (e2e)', () => {
   let app: INestApplication;
   let mongod: MongoMemoryServer;
+  let userModel: Model<User>;
 
   const password = 'Str0ng#Pass';
   const alice = {
@@ -53,7 +57,20 @@ describe('SquadUp API (e2e)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api');
     await app.init();
+    userModel = moduleRef.get<Model<User>>(getModelToken(User.name));
   });
+
+  /**
+   * Registration issues a token but leaves the account `pending` until the
+   * emailed code is entered, and JwtStrategy refuses a pending account — so
+   * every registered user has to be activated here before their token opens
+   * anything. Flipping the flag directly keeps the suite off the mail path.
+   */
+  async function activateAllUsers() {
+    await userModel
+      .updateMany({}, { $set: { account_status: AccountStatus.Active } })
+      .exec();
+  }
 
   afterAll(async () => {
     await app?.close();
@@ -75,6 +92,8 @@ describe('SquadUp API (e2e)', () => {
       .send(bob)
       .expect(201);
     bobToken = b.body.token;
+
+    await activateAllUsers();
   });
 
   it('rejects a password that violates the policy with 400', async () => {
@@ -145,6 +164,108 @@ describe('SquadUp API (e2e)', () => {
       (p: { status: string }) => p.status === 'joined',
     ).length;
     expect(activeCount).toBe(2);
+  });
+
+  describe('notifications', () => {
+    // Notifications are dispatched fire-and-forget, so the HTTP response can
+    // land before the row is written — poll rather than assert immediately.
+    async function waitFor(
+      token: string,
+      predicate: (rows: any[]) => boolean,
+      label: string,
+    ): Promise<any[]> {
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const res = await request(server())
+          .get('/api/notifications')
+          .set('Authorization', `Bearer ${token}`)
+          .expect(200);
+        if (predicate(res.body)) return res.body;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error(`timed out waiting for ${label}`);
+    }
+
+    const ofType = (rows: any[], type: string) =>
+      rows.filter((n: { type: string }) => n.type === type);
+
+    it('collapses repeated joins into one unread row for the host', async () => {
+      const carol = {
+        first_name: 'Carol',
+        last_name: 'Diaz',
+        username: 'carol_diaz',
+        email: 'carol@ucf.edu',
+        password,
+      };
+      const registered = await request(server())
+        .post('/api/auth/register')
+        .send(carol)
+        .expect(201);
+      await activateAllUsers();
+
+      await request(server())
+        .post(`/api/games/${gameId}/join`)
+        .set('Authorization', `Bearer ${registered.body.token}`)
+        .expect(201);
+
+      // Bob joined earlier and Carol just did — two joins, one row.
+      const rows = await waitFor(
+        aliceToken,
+        (list) => ofType(list, 'player_joined').length > 0,
+        'the host to be told someone joined',
+      );
+      expect(ofType(rows, 'player_joined')).toHaveLength(1);
+    });
+
+    it('collapses repeated edits into one row carrying the latest change', async () => {
+      await request(server())
+        .patch(`/api/games/${gameId}`)
+        .set('Authorization', `Bearer ${aliceToken}`)
+        .send({ start_time: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString() })
+        .expect(200);
+
+      await waitFor(
+        bobToken,
+        (list) => ofType(list, 'game_updated').length > 0,
+        'the first edit notification',
+      );
+
+      await request(server())
+        .patch(`/api/games/${gameId}`)
+        .set('Authorization', `Bearer ${aliceToken}`)
+        .send({ location: 'South Field' })
+        .expect(200);
+
+      const rows = await waitFor(
+        bobToken,
+        (list) => ofType(list, 'game_updated').some((n) => n.body.includes('location')),
+        'the second edit to fold into the first',
+      );
+      expect(ofType(rows, 'game_updated')).toHaveLength(1);
+    });
+
+    it('starts a fresh row once the previous one has been read', async () => {
+      await request(server())
+        .patch('/api/notifications/read-all')
+        .set('Authorization', `Bearer ${bobToken}`)
+        .expect(200);
+
+      await request(server())
+        .patch(`/api/games/${gameId}`)
+        .set('Authorization', `Bearer ${aliceToken}`)
+        .send({ location: 'East Field' })
+        .expect(200);
+
+      const rows = await waitFor(
+        bobToken,
+        (list) => ofType(list, 'game_updated').some((n) => !n.read),
+        'a new edit notification after the old one was read',
+      );
+
+      // The read row is kept as history; the new event stands on its own.
+      const updates = ofType(rows, 'game_updated');
+      expect(updates).toHaveLength(2);
+      expect(updates.filter((n) => !n.read)).toHaveLength(1);
+    });
   });
 
   it('exposes Prometheus metrics including the breach-check counter', async () => {
