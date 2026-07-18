@@ -200,10 +200,16 @@ export class GamesController {
 
   @Delete(':id/guests/:index')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Remove a guest from the roster by index (host only)' })
+  @ApiOperation({
+    summary:
+      'Remove a guest from the roster by index (the host, or whoever added them)',
+  })
   @ApiResponse({ status: 200, description: 'The updated game.' })
   @ApiResponse({ status: 400, description: 'No guest at that index.' })
-  @ApiResponse({ status: 403, description: 'Only the host can remove guests.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Not the host, and not the player who added this guest.',
+  })
   removeGuest(
     @CurrentUser() user: UserDocument,
     @Param('id') id: string,

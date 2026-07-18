@@ -621,6 +621,7 @@ describe('GamesService', () => {
       const game = makeGame({
         participants: [
           { user: 'host-id', status: ParticipantStatus.Joined },
+          // No added_by (predates the field), so nobody but the host owns it.
           { name: 'Sam', status: ParticipantStatus.Joined },
         ],
       });
@@ -628,6 +629,57 @@ describe('GamesService', () => {
       await expect(
         service.removeGuest('game-id', 'stranger', 1),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets the player who brought a guest remove them', async () => {
+      const game = makeGame({
+        status: GameStatus.Locked,
+        min_players: 2,
+        max_players: 3,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { user: 'u2', status: ParticipantStatus.Joined },
+          { name: 'u2 guest', status: ParticipantStatus.Joined, added_by: 'u2' },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.removeGuest('game-id', 'u2', 2);
+
+      expect(game.participants).toHaveLength(2);
+      // The freed spot reopens a game that was full.
+      expect(game.status).toBe(GameStatus.Confirmed);
+    });
+
+    it("forbids a player from removing someone else's guest", async () => {
+      const game = makeGame({
+        max_players: 4,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { user: 'u2', status: ParticipantStatus.Joined },
+          { name: 'u3 guest', status: ParticipantStatus.Joined, added_by: 'u3' },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+      await expect(
+        service.removeGuest('game-id', 'u2', 2),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('still lets the host remove a guest somebody else brought', async () => {
+      const game = makeGame({
+        max_players: 4,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { user: 'u2', status: ParticipantStatus.Joined },
+          { name: 'u2 guest', status: ParticipantStatus.Joined, added_by: 'u2' },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.removeGuest('game-id', 'host-id', 2);
+
+      expect(game.participants).toHaveLength(2);
     });
   });
 

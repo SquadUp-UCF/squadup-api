@@ -474,12 +474,22 @@ return game;
     index: number,
   ): Promise<GameDocument> {
     const game = await this.findByIdOrFail(id);
-    this.assertHost(game, userId);
     this.assertNotTerminal(game);
 
     const participant = game.participants[index];
     if (!participant || participant.user) {
       throw new BadRequestException('No guest at that position on the roster');
+    }
+
+    // The host manages the whole roster; anyone else may only take back a
+    // guest they brought themselves. Guests predating `added_by` have no
+    // owner on record, so they stay host-only.
+    const isHost = game.host.toString() === userId;
+    const broughtThem = participant.added_by?.toString() === userId;
+    if (!isHost && !broughtThem) {
+      throw new ForbiddenException(
+        'Only the host or the player who added this guest can remove them',
+      );
     }
 
     game.participants.splice(index, 1);
