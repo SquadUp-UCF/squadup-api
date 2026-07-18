@@ -138,6 +138,11 @@ export class Game {
 
   @Prop()
   photo_url?: string;
+
+  // Users who have submitted their player ratings for this (completed) game.
+  // Prevents double-rating and drives the "games awaiting your rating" prompt.
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
+  rated_by: Types.ObjectId[];
 }
 
 export const GameSchema = SchemaFactory.createForClass(Game);

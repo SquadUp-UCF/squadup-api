@@ -27,6 +27,7 @@ import { UpdateGameDto } from './dto/update-game.dto';
 import { JoinGameDto } from './dto/join-game.dto';
 import { ListGamesDto } from './dto/list-games.dto';
 import { MyGamesDto, MyGamesRole } from './dto/my-games.dto';
+import { RateGameDto } from './dto/rate-game.dto';
 import { validateDto } from '../common/validation/validate-dto';
 import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -43,6 +44,9 @@ const TERMINAL_STATUSES: GameStatus[] = [
 // over and hidden — unless the host ends/cancels it sooner. Four hours covers a
 // long session (double-headers, extra innings) without leaving stale games up.
 const DISCOVERY_GRACE_MS = 4 * 60 * 60 * 1000;
+
+// How much a single thumbs up/down nudges a rated player's 0–5 reputation.
+const RATING_DELTA = { up: 0.1, down: -0.2 } as const;
 
 @Injectable()
 export class GamesService {
@@ -216,7 +220,14 @@ export class GamesService {
    */
   async join(id: string, userId: string, payload: JoinGameDto = {}): Promise<GameDocument> {
     const dto = await validateDto(JoinGameDto, payload);
-    const partySize = dto.party_size ?? 1;
+    // Named guests the caller brings; each is its own roster entry (party_size
+    // 1). When guests are given, the caller counts as 1 and party_size is
+    // ignored — otherwise fall back to the anonymous party_size headcount.
+    const guests = (dto.guests ?? [])
+      .map((g) => ({ name: g.name?.trim() ?? '', position: g.position?.trim() || undefined }))
+      .filter((g) => g.name.length > 0);
+    const partySize = guests.length > 0 ? 1 : dto.party_size ?? 1;
+    const needed = partySize + guests.length;
     const game = await this.findByIdOrFail(id);
 
     if (game.status === GameStatus.Locked) {
@@ -237,7 +248,7 @@ export class GamesService {
     }
 
     const remaining = game.max_players - this.activePartySize(game);
-    if (partySize > remaining) {
+    if (needed > remaining) {
       throw new BadRequestException(
         remaining <= 0
           ? 'Game is full'
@@ -256,6 +267,16 @@ export class GamesService {
         joined_at: new Date(),
         party_size: partySize,
       });
+    }
+
+    for (const g of guests) {
+      game.participants.push({
+        name: g.name,
+        status: ParticipantStatus.Joined,
+        joined_at: new Date(),
+        party_size: 1,
+        ...(g.position ? { position: g.position } : {}),
+      } as GameDocument['participants'][number]);
     }
 
     const prevStatus = game.status;
@@ -461,6 +482,63 @@ return game;
 
     game.status = GameStatus.Completed;
     return game.save();
+  }
+
+  /**
+   * Record a player's thumbs up/down for the other participants of a completed
+   * game. Each rating nudges the rated user's reputation; the rater is recorded
+   * in `rated_by` so they can't rate the same game twice.
+   */
+  async rateGame(id: string, raterId: string, payload: RateGameDto): Promise<GameDocument> {
+    const dto = await validateDto(RateGameDto, payload);
+    const game = await this.findByIdOrFail(id);
+
+    if (game.status !== GameStatus.Completed) {
+      throw new BadRequestException('You can only rate a completed game');
+    }
+    const isParticipant = game.participants.some(
+      (p) => p.user?.toString() === raterId && p.status === ParticipantStatus.Joined,
+    );
+    if (!isParticipant) {
+      throw new ForbiddenException('Only players in this game can rate it');
+    }
+    if (game.rated_by.some((u) => u.toString() === raterId)) {
+      throw new BadRequestException('You have already rated this game');
+    }
+
+    // Only joined, registered participants other than the rater can be rated.
+    const rateable = new Set(
+      game.participants
+        .filter((p) => p.user && p.status === ParticipantStatus.Joined)
+        .map((p) => p.user!.toString())
+        .filter((uid) => uid !== raterId),
+    );
+
+    for (const r of dto.ratings) {
+      if (rateable.has(r.user)) {
+        await this.usersService.adjustReputation(r.user, RATING_DELTA[r.value]);
+      }
+    }
+
+    game.rated_by.push(raterId as unknown as GameDocument['rated_by'][number]);
+    return game.save();
+  }
+
+  /**
+   * Completed games the user played in but hasn't rated yet — drives the
+   * "rate your teammates" prompt when they open the app or refresh the feed.
+   */
+  findPendingRatings(userId: string): Promise<GameDocument[]> {
+    return this.gameModel
+      .find({
+        status: GameStatus.Completed,
+        participants: {
+          $elemMatch: { user: userId, status: ParticipantStatus.Joined },
+        },
+        rated_by: { $ne: userId },
+      })
+      .sort({ updatedAt: -1 })
+      .exec();
   }
 
   /**

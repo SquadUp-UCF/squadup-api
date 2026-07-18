@@ -43,6 +43,7 @@ import {
 } from '@nestjs/swagger';
 import { GamesService } from './games.service';
 import { CreateGameDto, InitialPlayerDto } from './dto/create-game.dto';
+import { RateGameDto } from './dto/rate-game.dto';
 import { SetPositionDto } from './dto/set-position.dto';
 import { UpdateGameDto } from './dto/update-game.dto';
 import { JoinGameDto } from './dto/join-game.dto';
@@ -86,6 +87,14 @@ export class GamesController {
   @ApiResponse({ status: 200, description: "The caller's games." })
   findMine(@CurrentUser() user: UserDocument, @Query() query: MyGamesDto) {
     return this.gamesService.findForUser(user.id, query);
+  }
+
+  // Declared before `:id` so "pending-ratings" isn't captured as a game id.
+  @Get('pending-ratings')
+  @ApiOperation({ summary: "Completed games the caller still needs to rate" })
+  @ApiResponse({ status: 200, description: 'Games awaiting the caller\'s ratings.' })
+  findPendingRatings(@CurrentUser() user: UserDocument) {
+    return this.gamesService.findPendingRatings(user.id);
   }
 
   @Get(':id')
@@ -231,5 +240,15 @@ export class GamesController {
   @ApiResponse({ status: 403, description: 'Only the host can complete.' })
   complete(@CurrentUser() user: UserDocument, @Param('id') id: string) {
     return this.gamesService.complete(id, user.id);
+  }
+
+  @Post(':id/ratings')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Rate the other players of a completed game (thumbs up/down)" })
+  @ApiResponse({ status: 200, description: 'The game, now recorded as rated by the caller.' })
+  @ApiResponse({ status: 400, description: 'Game not completed, or already rated.' })
+  @ApiResponse({ status: 403, description: 'Only players in the game can rate it.' })
+  rate(@CurrentUser() user: UserDocument, @Param('id') id: string, @Body() dto: RateGameDto) {
+    return this.gamesService.rateGame(id, user.id, dto);
   }
 }

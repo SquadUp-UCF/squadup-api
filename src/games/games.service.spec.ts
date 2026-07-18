@@ -32,6 +32,7 @@ function makeGame(overrides: Record<string, any> = {}) {
     participants: [
       { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
     ],
+    rated_by: [],
     ...overrides,
   };
   game.save = jest.fn().mockResolvedValue(game);
@@ -55,6 +56,7 @@ describe('GamesService', () => {
     addCreatedGame: jest.Mock;
     addJoinedGame: jest.Mock;
     removeJoinedGame: jest.Mock;
+    adjustReputation: jest.Mock;
   };
   let notifications: { sendToUser: jest.Mock };
 
@@ -64,6 +66,7 @@ describe('GamesService', () => {
       addCreatedGame: jest.fn().mockResolvedValue(undefined),
       addJoinedGame: jest.fn().mockResolvedValue(undefined),
       removeJoinedGame: jest.fn().mockResolvedValue(undefined),
+      adjustReputation: jest.fn().mockResolvedValue(undefined),
     };
     notifications = { sendToUser: jest.fn().mockResolvedValue(undefined) };
 
@@ -674,6 +677,67 @@ describe('GamesService', () => {
       await expect(service.complete('game-id', 'host-id')).rejects.toBeInstanceOf(
         BadRequestException,
       );
+    });
+  });
+
+  describe('rateGame', () => {
+    // Ratee ids must be valid ObjectIds (the DTO enforces @IsMongoId).
+    const HOST = '507f1f77bcf86cd799439011';
+    const U2 = '507f1f77bcf86cd799439012';
+    const STRANGER = '507f1f77bcf86cd799439013';
+    const completedGame = () =>
+      makeGame({
+        host: HOST,
+        status: GameStatus.Completed,
+        participants: [
+          { user: HOST, status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: U2, status: ParticipantStatus.Joined, joined_at: new Date() },
+        ],
+        rated_by: [],
+      });
+
+    it('records the rater and adjusts the ratee reputation', async () => {
+      const game = completedGame();
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.rateGame('game-id', U2, { ratings: [{ user: HOST, value: 'up' }] });
+
+      expect(users.adjustReputation).toHaveBeenCalledWith(HOST, 0.1);
+      expect(game.rated_by).toContain(U2);
+      expect(game.save).toHaveBeenCalled();
+    });
+
+    it('rejects rating a game that is not completed', async () => {
+      const game = makeGame({ status: GameStatus.Open });
+      model.findById.mockReturnValue(queryStub(game));
+      await expect(
+        service.rateGame('game-id', 'host-id', { ratings: [] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('forbids a non-participant from rating', async () => {
+      const game = completedGame();
+      model.findById.mockReturnValue(queryStub(game));
+      await expect(
+        service.rateGame('game-id', STRANGER, { ratings: [] }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('rejects rating the same game twice', async () => {
+      const game = completedGame();
+      game.rated_by = [U2];
+      model.findById.mockReturnValue(queryStub(game));
+      await expect(
+        service.rateGame('game-id', U2, { ratings: [] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('ignores ratings for players not in the game', async () => {
+      const game = completedGame();
+      model.findById.mockReturnValue(queryStub(game));
+      await service.rateGame('game-id', U2, { ratings: [{ user: STRANGER, value: 'down' }] });
+      expect(users.adjustReputation).not.toHaveBeenCalled();
+      expect(game.rated_by).toContain(U2);
     });
   });
 });

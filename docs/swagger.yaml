@@ -379,6 +379,16 @@ paths:
           description: The caller's games.
       tags: *ref_3
       security: *ref_4
+  /api/games/pending-ratings:
+    get:
+      operationId: GamesController_findPendingRatings
+      summary: Completed games the caller still needs to rate
+      parameters: []
+      responses:
+        '200':
+          description: Games awaiting the caller's ratings.
+      tags: *ref_3
+      security: *ref_4
   /api/games/{id}:
     get:
       operationId: GamesController_findOne
@@ -632,6 +642,31 @@ paths:
           description: The completed game.
         '403':
           description: Only the host can complete.
+      tags: *ref_3
+      security: *ref_4
+  /api/games/{id}/ratings:
+    post:
+      operationId: GamesController_rate
+      summary: Rate the other players of a completed game (thumbs up/down)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RateGameDto'
+      responses:
+        '200':
+          description: The game, now recorded as rated by the caller.
+        '400':
+          description: Game not completed, or already rated.
+        '403':
+          description: Only players in the game can rate it.
       tags: *ref_3
       security: *ref_4
   /api/notifications/device-token:
@@ -966,8 +1001,19 @@ components:
           minimum: 1
           maximum: 20
           description: >-
-            Total headcount this join represents, including the caller. Rejected
-            if the group would exceed the remaining spots.
+            Total headcount this join represents, including the caller. Ignored
+            when `guests` is provided.
+        guests:
+          example:
+            - name: Sam Lee
+              position: Setter
+          description: >-
+            Named guests the caller is bringing. Each counts toward the roster
+            like a player and may carry an optional position. The caller is
+            added automatically.
+          type: array
+          items:
+            $ref: '#/components/schemas/InitialPlayerDto'
     SetPositionDto:
       type: object
       properties:
@@ -975,6 +1021,29 @@ components:
           type: string
           example: Midfielder
           description: Your (sport-specific, free-text) position. Empty/omitted clears it.
+    PlayerRatingDto:
+      type: object
+      properties:
+        user:
+          type: string
+          description: Rated user id.
+        value:
+          type: string
+          enum:
+            - up
+            - down
+      required:
+        - user
+        - value
+    RateGameDto:
+      type: object
+      properties:
+        ratings:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlayerRatingDto'
+      required:
+        - ratings
     RegisterDeviceDto:
       type: object
       properties:
