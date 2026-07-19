@@ -10,6 +10,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { createRequestTracker } from './common/throttler/request-tracker';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { GamesModule } from './games/games.module';
@@ -25,7 +26,17 @@ import { NotificationsModule } from './notifications/notifications.module';
         uri: config.get<string>('MONGO_URI'),
       }),
     }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
+    // 60 requests/minute, bucketed per account rather than per IP so a shared
+    // campus/carrier address isn't one budget for everyone on it — see
+    // createRequestTracker. Anonymous traffic still buckets by IP, which is
+    // what the tighter `/auth` limit relies on.
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        throttlers: [{ ttl: 60_000, limit: 60 }],
+        getTracker: createRequestTracker(config.get<string>('JWT_SECRET')),
+      }),
+    }),
     MetricsModule,
     AuthModule,
     UsersModule,
