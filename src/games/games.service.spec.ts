@@ -572,6 +572,7 @@ describe('GamesService', () => {
     });
 
     it('lets a joined non-host player add a guest of their own', async () => {
+      // A player who already committed can still bring a friend afterwards.
       const game = makeGame({
         max_players: 4,
         participants: [
@@ -584,7 +585,12 @@ describe('GamesService', () => {
       await service.addGuest('game-id', 'u2', { name: 'Sam Lee' });
 
       expect(game.participants).toHaveLength(3);
-      expect(game.participants[2]).toMatchObject({ name: 'Sam Lee', added_by: 'u2' });
+      expect(game.participants[2]).toMatchObject({
+        name: 'Sam Lee',
+        status: ParticipantStatus.Joined,
+        added_by: 'u2',
+      });
+      expect(game.save).toHaveBeenCalled();
     });
 
     it('rejects adding a guest to a full roster', async () => {

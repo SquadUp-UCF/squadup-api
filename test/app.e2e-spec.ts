@@ -266,6 +266,144 @@ describe('SquadUp API (e2e)', () => {
       expect(updates).toHaveLength(2);
       expect(updates.filter((n) => !n.read)).toHaveLength(1);
     });
+
+    it('deletes a single row, leaving the rest of the history alone', async () => {
+      const before = await waitFor(
+        bobToken,
+        (list) => list.length > 1,
+        'Bob to have more than one notification to thin out',
+      );
+      const target = before[0];
+
+      await request(server())
+        .delete(`/api/notifications/${target._id ?? target.id}`)
+        .set('Authorization', `Bearer ${bobToken}`)
+        .expect(204);
+
+      const after = await request(server())
+        .get('/api/notifications')
+        .set('Authorization', `Bearer ${bobToken}`)
+        .expect(200);
+
+      expect(after.body).toHaveLength(before.length - 1);
+      expect(
+        after.body.some(
+          (n: any) => String(n._id ?? n.id) === String(target._id ?? target.id),
+        ),
+      ).toBe(false);
+    });
+
+    it('will not let one user delete another user\'s notification', async () => {
+      const alices = await waitFor(
+        aliceToken,
+        (list) => list.length > 0,
+        'Alice to have a notification of her own',
+      );
+      const target = alices[0];
+
+      // Scoped by owner, so this is a silent no-op rather than an error.
+      await request(server())
+        .delete(`/api/notifications/${target._id ?? target.id}`)
+        .set('Authorization', `Bearer ${bobToken}`)
+        .expect(204);
+
+      const after = await request(server())
+        .get('/api/notifications')
+        .set('Authorization', `Bearer ${aliceToken}`)
+        .expect(200);
+      expect(
+        after.body.some(
+          (n: any) => String(n._id ?? n.id) === String(target._id ?? target.id),
+        ),
+      ).toBe(true);
+    });
+
+    it('clears the whole history for the caller only', async () => {
+      await request(server())
+        .delete('/api/notifications')
+        .set('Authorization', `Bearer ${bobToken}`)
+        .expect(204);
+
+      const bobs = await request(server())
+        .get('/api/notifications')
+        .set('Authorization', `Bearer ${bobToken}`)
+        .expect(200);
+      expect(bobs.body).toHaveLength(0);
+
+      // Alice's history is untouched.
+      const alices = await request(server())
+        .get('/api/notifications')
+        .set('Authorization', `Bearer ${aliceToken}`)
+        .expect(200);
+      expect(alices.body.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('guests', () => {
+    it('lets a joined player (not just the host) bring a guest', async () => {
+      const me = await request(server())
+        .get('/api/users/me')
+        .set('Authorization', `Bearer ${bobToken}`)
+        .expect(200);
+      const bobId = String(me.body._id ?? me.body.id);
+
+      const res = await request(server())
+        .post(`/api/games/${gameId}/guests`)
+        .set('Authorization', `Bearer ${bobToken}`)
+        .send({ name: "Bob's friend" })
+        .expect(201);
+
+      const guest = res.body.participants.find(
+        (p: { name?: string }) => p.name === "Bob's friend",
+      );
+      expect(guest).toBeDefined();
+      // Stamped with Bob, which is what lets him remove them again.
+      expect(String(guest.added_by)).toBe(bobId);
+    });
+
+    it('lets the player who added a guest remove them again', async () => {
+      const before = await request(server())
+        .get(`/api/games/${gameId}`)
+        .set('Authorization', `Bearer ${bobToken}`)
+        .expect(200);
+
+      const index = before.body.participants.findIndex(
+        (p: { name?: string }) => p.name === "Bob's friend",
+      );
+      expect(index).toBeGreaterThan(-1);
+
+      const res = await request(server())
+        .delete(`/api/games/${gameId}/guests/${index}`)
+        .set('Authorization', `Bearer ${bobToken}`)
+        .expect(200);
+
+      expect(
+        res.body.participants.some(
+          (p: { name?: string }) => p.name === "Bob's friend",
+        ),
+      ).toBe(false);
+    });
+
+    it('refuses a guest from someone who is not on the roster', async () => {
+      const dave = {
+        first_name: 'Dave',
+        last_name: 'Roy',
+        username: 'dave_roy',
+        email: 'dave@ucf.edu',
+        password,
+      };
+      const registered = await request(server())
+        .post('/api/auth/register')
+        .send(dave)
+        .expect(201);
+      await activateAllUsers();
+
+      await request(server())
+        .post(`/api/games/${gameId}/guests`)
+        .set('Authorization', `Bearer ${registered.body.token}`)
+        .send({ name: 'Nobody' })
+        .expect(403);
+    });
   });
 
   it('exposes Prometheus metrics including the breach-check counter', async () => {

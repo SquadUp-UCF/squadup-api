@@ -149,6 +149,19 @@ export class NotificationsService {
     ).exec();
   }
 
+  /**
+   * Delete a single row from the caller's history. Scoped by `userId` so a
+   * guessed id can't remove someone else's notification; a miss is a no-op
+   * rather than an error, which keeps the client's optimistic removal (and any
+   * retry of it) idempotent.
+   */
+  async remove(notificationId: string, userId: string): Promise<void> {
+    if (!Types.ObjectId.isValid(notificationId)) return;
+    await this.notificationModel
+      .deleteOne({ _id: notificationId, userId: new Types.ObjectId(userId) })
+      .exec();
+  }
+
   /** Permanently delete every notification row for the user ("clear all"). */
   async clearAll(userId: string): Promise<void> {
     await this.notificationModel

@@ -44,10 +44,22 @@ export class NotificationsController {
     return this.notificationsService.markAllRead(user.id);
   }
 
+  // Declared before `:id` so the literal path isn't swallowed by the param route.
   @Delete()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Clear (permanently delete) all notifications for the current user' })
   clearAll(@CurrentUser() user: UserDocument) {
     return this.notificationsService.clearAll(user.id);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a single notification' })
+  @ApiResponse({
+    status: 204,
+    description: 'Deleted, or already gone — this is idempotent.',
+  })
+  remove(@Param('id') id: string, @CurrentUser() user: UserDocument) {
+    return this.notificationsService.remove(id, user.id);
   }
 }
