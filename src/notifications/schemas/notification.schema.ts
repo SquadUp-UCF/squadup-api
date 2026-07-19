@@ -10,6 +10,7 @@ export enum NotificationType {
   PlayerJoined = 'player_joined',
   GameStartingSoon = 'game_starting_soon',
   GameCancelled = 'game_cancelled',
+  GameCompleted = 'game_completed',
   GameUpdated = 'game_updated',
 }
 

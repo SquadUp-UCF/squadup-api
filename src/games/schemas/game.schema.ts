@@ -148,9 +148,16 @@ export class Game {
   @Prop()
   photo_url?: string;
 
-  // Users who have submitted their player ratings for this (completed) game.
-  // Prevents double-rating and drives the "games awaiting your rating" prompt.
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
+  // Users who have already submitted post-game ratings for this game — lets
+  // `GET /games/pending-ratings` skip games a caller already rated, and blocks
+  // a second submission from the same rater.
+  //
+  // NOTE: `type` and `ref` must be sibling keys here (`{ type: [Types.ObjectId],
+  // ref: 'User' }`), not nested (`{ type: [{ type: Types.ObjectId, ref: 'User' }] }`)
+  // — see the identical note on `User.saved_games` (users/schemas/user.schema.ts)
+  // for why the nested form silently breaks `$addToSet`'s cast and `.populate()`
+  // with this mongoose/@nestjs-mongoose version pair.
+  @Prop({ type: [Types.ObjectId], ref: 'User', default: [] })
   rated_by: Types.ObjectId[];
 }
 

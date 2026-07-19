@@ -18,8 +18,6 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { unlink } from 'node:fs/promises';
-import { basename, join } from 'node:path';
 import { Game, GameDocument, GameStatus, ParticipantStatus } from './schemas/game.schema';
 import { CreateGameDto, InitialPlayerDto } from './dto/create-game.dto';
 import { SetPositionDto } from './dto/set-position.dto';
@@ -33,7 +31,6 @@ import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/schemas/notification.schema';
 import { bannerForSport, isStockBanner } from './sport-banners';
-import { BANNER_DIR } from './banner-upload';
 
 const TERMINAL_STATUSES: GameStatus[] = [
   GameStatus.Completed,
@@ -188,6 +185,17 @@ export class GamesService {
     const game = await this.findByIdOrFail(id);
     this.assertHost(game, userId);
     this.assertNotTerminal(game);
+
+    // Same "must be in the future" rule `create` enforces — only checked
+    // when the edit actually touches start_time, so fixing an unrelated
+    // field (e.g. the description) on a game that's already started/passed
+    // doesn't force the host to also bump its time.
+    if (
+      dto.start_time !== undefined &&
+      new Date(dto.start_time).getTime() <= Date.now()
+    ) {
+      throw new BadRequestException('start_time must be in the future');
+    }
 
     const prevPhoto = game.photo_url;
     // Snapshot the details a player plans around, so an edit to any of them can
@@ -348,38 +356,9 @@ export class GamesService {
       gameId: game.id,
     }).catch(() => {});
 
-    // Notify all participants if status changed
-    if (prevStatus !== game.status) {
-  const activeParticipants = game.participants
-    .filter((p) => p.status === ParticipantStatus.Joined && p.user)
-    .map((p) => p.user!.toString());
-
-  const newStatus = game.status as GameStatus;
-
-  if (newStatus === GameStatus.Confirmed) {
-    for (const participantId of activeParticipants) {
-      this.notificationsService.sendToUser({
-        userId: participantId,
-        type: NotificationType.GameConfirmed,
-        title: 'Game confirmed!',
-        body: `Your ${game.sport} game has enough players and is confirmed.`,
-        gameId: game.id,
-      }).catch(() => {});
-    }
-  } else if (newStatus === GameStatus.Locked) {
-    for (const participantId of activeParticipants) {
-      this.notificationsService.sendToUser({
-        userId: participantId,
-        type: NotificationType.GameLocked,
-        title: 'Game is full!',
-        body: `Your ${game.sport} game is now full.`,
-        gameId: game.id,
-      }).catch(() => {});
-    }
+    this.notifyStatusChange(game, prevStatus);
+    return game;
   }
-}
-return game;
-}
 
   async leave(id: string, userId: string): Promise<GameDocument> {
     const game = await this.findByIdOrFail(id);
@@ -459,8 +438,11 @@ return game;
       ...(position ? { position } : {}),
     } as unknown as GameDocument['participants'][number]);
 
+    const prevStatus = game.status;
     this.recomputeStatus(game);
-    return game.save();
+    const saved = await game.save();
+    this.notifyStatusChange(saved, prevStatus);
+    return saved;
   }
 
   /**
@@ -561,7 +543,26 @@ return game;
     this.assertNotTerminal(game);
 
     game.status = GameStatus.Completed;
-    return game.save();
+    const saved = await game.save();
+
+    // Nudge every other joined participant to rate their teammates — the
+    // host (who just took this action) doesn't need telling, but still gets
+    // prompted for ratings client-side via GET /games/pending-ratings like
+    // everyone else.
+    const otherParticipants = saved.participants
+      .filter((p) => p.status === ParticipantStatus.Joined && p.user && p.user.toString() !== userId)
+      .map((p) => p.user!.toString());
+    for (const participantId of otherParticipants) {
+      this.notificationsService.sendToUser({
+        userId: participantId,
+        type: NotificationType.GameCompleted,
+        title: 'Game completed',
+        body: `Your ${saved.sport} game at ${saved.location} has ended — rate your teammates.`,
+        gameId: saved.id,
+      }).catch(() => {});
+    }
+
+    return saved;
   }
 
   /**
@@ -635,56 +636,6 @@ return game;
     await this.usersService.removeCreatedGame(userId, game.id);
   }
 
-  /**
-   * Point a game's banner at a freshly uploaded image (already written to
-   * disk by Multer) and remove the file it replaces — but only when that
-   * previous file was itself a host upload, never a committed stock banner.
-   */
-  async setPhoto(id: string, userId: string, publicPath: string): Promise<GameDocument> {
-    const game = await this.findByIdOrFail(id);
-    this.assertHost(game, userId);
-
-    const previous = game.photo_url;
-    game.photo_url = publicPath;
-    await game.save();
-
-    if (!isStockBanner(previous)) {
-      await this.deleteBannerFile(previous as string);
-    }
-    return game;
-  }
-
-  /**
-   * Revert a game's banner to the sport's stock default, removing the
-   * uploaded file if one was set.
-   */
-  async removePhoto(id: string, userId: string): Promise<GameDocument> {
-    const game = await this.findByIdOrFail(id);
-    this.assertHost(game, userId);
-
-    const previous = game.photo_url;
-    game.photo_url = bannerForSport(game.sport);
-    await game.save();
-
-    if (!isStockBanner(previous)) {
-      await this.deleteBannerFile(previous as string);
-    }
-    return game;
-  }
-
-  /**
-   * Best-effort deletion of a stored banner file. Only the basename is used so
-   * a stored path can never point outside the banner directory, and a missing
-   * file is ignored — the row is the source of truth, the file just backs it.
-   */
-  private async deleteBannerFile(publicPath: string): Promise<void> {
-    try {
-      await unlink(join(BANNER_DIR, basename(publicPath)));
-    } catch {
-      // Already gone (manual cleanup, prior failure) — nothing to do.
-    }
-  }
-
   // --- helpers -------------------------------------------------------------
 
   private isTerminal(game: GameDocument): boolean {
@@ -722,6 +673,42 @@ return game;
       game.status = GameStatus.Confirmed;
     } else {
       game.status = GameStatus.Open;
+    }
+  }
+
+  /**
+   * Notify every joined (registered) participant when a roster change flips
+   * the game to `confirmed` or `locked` — called after ANY path that can
+   * change the active headcount (`join`, `addGuest`, and `update` editing
+   * min/max), not just `join`. Guests aren't notified (they have no account).
+   */
+  private notifyStatusChange(game: GameDocument, prevStatus: GameStatus): void {
+    if (prevStatus === game.status) return;
+
+    const activeParticipants = game.participants
+      .filter((p) => p.status === ParticipantStatus.Joined && p.user)
+      .map((p) => p.user!.toString());
+
+    if (game.status === GameStatus.Confirmed) {
+      for (const participantId of activeParticipants) {
+        this.notificationsService.sendToUser({
+          userId: participantId,
+          type: NotificationType.GameConfirmed,
+          title: 'Game confirmed!',
+          body: `Your ${game.sport} game has enough players and is confirmed.`,
+          gameId: game.id,
+        }).catch(() => {});
+      }
+    } else if (game.status === GameStatus.Locked) {
+      for (const participantId of activeParticipants) {
+        this.notificationsService.sendToUser({
+          userId: participantId,
+          type: NotificationType.GameLocked,
+          title: 'Game is full!',
+          body: `Your ${game.sport} game is now full.`,
+          gameId: game.id,
+        }).catch(() => {});
+      }
     }
   }
 }

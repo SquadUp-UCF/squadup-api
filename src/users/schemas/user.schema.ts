@@ -94,16 +94,29 @@ export class User {
   sport_positions: Map<string, string>;
 
   // Games hosted by this user. Fully wired once the Game schema exists.
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Game' }], default: [] })
+  //
+  // NOTE: the array element type + `ref` must be declared as SIBLING keys
+  // (`{ type: [Types.ObjectId], ref: 'Game' }`), not nested
+  // (`{ type: [{ type: Types.ObjectId, ref: 'Game' }] }`). The nested form
+  // compiles "successfully" with no error, but `@nestjs/mongoose`'s `@Prop`
+  // decorator silently mis-casts it: the array's caster ends up `Mixed`
+  // instead of `ObjectId`, and `ref` is dropped entirely — so `$addToSet`
+  // stores whatever type was handed to it (often a raw string) instead of
+  // casting to `ObjectId`, and `.populate()` on the field silently no-ops
+  // rather than throwing. Confirmed by isolated repro against this exact
+  // mongoose/@nestjs-mongoose version pair; verified this sibling form's
+  // `.populate()` actually resolves real documents before relying on it in
+  // `UsersService.getSavedGames()`.
+  @Prop({ type: [Types.ObjectId], ref: 'Game', default: [] })
   games_created: Types.ObjectId[];
 
   // Games this user has joined. Fully wired once the Game schema exists.
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Game' }], default: [] })
+  @Prop({ type: [Types.ObjectId], ref: 'Game', default: [] })
   games_joined: Types.ObjectId[];
 
   // Games the user bookmarked ("saved") to follow without joining the roster.
   // Distinct from games_joined: saving never affects a game's headcount.
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Game' }], default: [] })
+  @Prop({ type: [Types.ObjectId], ref: 'Game', default: [] })
   saved_games: Types.ObjectId[];
 
   // Soft-delete marker. When set, the account is treated as deleted (login

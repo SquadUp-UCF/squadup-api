@@ -260,28 +260,40 @@ export class UsersService {
   /** Record that a user hosted a game (idempotent via `$addToSet`). */
   async addCreatedGame(userId: string, gameId: string): Promise<void> {
     await this.userModel
-      .updateOne({ _id: userId }, { $addToSet: { games_created: gameId } })
+      .updateOne(
+        { _id: userId },
+        { $addToSet: { games_created: new Types.ObjectId(gameId) } },
+      )
       .exec();
   }
 
   /** Record that a user joined a game (idempotent via `$addToSet`). */
   async addJoinedGame(userId: string, gameId: string): Promise<void> {
     await this.userModel
-      .updateOne({ _id: userId }, { $addToSet: { games_joined: gameId } })
+      .updateOne(
+        { _id: userId },
+        { $addToSet: { games_joined: new Types.ObjectId(gameId) } },
+      )
       .exec();
   }
 
   /** Remove a game from a user's joined list when they leave. */
   async removeJoinedGame(userId: string, gameId: string): Promise<void> {
     await this.userModel
-      .updateOne({ _id: userId }, { $pull: { games_joined: gameId } })
+      .updateOne(
+        { _id: userId },
+        { $pull: { games_joined: new Types.ObjectId(gameId) } },
+      )
       .exec();
   }
 
   /** Remove a game from a user's created list when the host deletes it. */
   async removeCreatedGame(userId: string, gameId: string): Promise<void> {
     await this.userModel
-      .updateOne({ _id: userId }, { $pull: { games_created: gameId } })
+      .updateOne(
+        { _id: userId },
+        { $pull: { games_created: new Types.ObjectId(gameId) } },
+      )
       .exec();
   }
 
@@ -307,6 +319,14 @@ export class UsersService {
    * Bookmark a game for the user ("save"). Idempotent via `$addToSet`, so
    * saving an already-saved game is a no-op. Returns the updated user so the
    * caller sees the new `saved_games`. Saving never touches the game's roster.
+   *
+   * The id is cast to a real `ObjectId` before the write — passing the raw
+   * string through to `$addToSet` does NOT reliably get cast against the
+   * array's `[{ type: ObjectId, ref: 'Game' }]` schema shape, so without this
+   * the value lands in Mongo as a plain string. `getSavedGames`'s
+   * `.populate()` then silently fails to resolve it (Mongoose just leaves an
+   * unresolved id in place rather than erroring), so every saved game would
+   * render blank instead of throwing anything that would've caught this.
    */
   async saveGame(userId: string, gameId: string): Promise<UserDocument> {
     if (!Types.ObjectId.isValid(gameId)) {
@@ -315,7 +335,7 @@ export class UsersService {
     const updated = await this.userModel
       .findOneAndUpdate(
         { _id: userId, deleted_at: null },
-        { $addToSet: { saved_games: gameId } },
+        { $addToSet: { saved_games: new Types.ObjectId(gameId) } },
         { new: true },
       )
       .exec();
@@ -333,7 +353,7 @@ export class UsersService {
     const updated = await this.userModel
       .findOneAndUpdate(
         { _id: userId, deleted_at: null },
-        { $pull: { saved_games: gameId } },
+        { $pull: { saved_games: new Types.ObjectId(gameId) } },
         { new: true },
       )
       .exec();
@@ -346,7 +366,11 @@ export class UsersService {
   /**
    * The full game documents the user has saved, newest-saved first. Games that
    * were since deleted populate as null and are filtered out, so a stale
-   * bookmark never surfaces a broken entry.
+   * bookmark never surfaces a broken entry. Also drops any id that failed to
+   * populate into an object at all (e.g. a pre-existing row saved before the
+   * `saveGame` ObjectId-cast fix, which would otherwise still be the raw
+   * string id `.populate()` couldn't resolve) rather than surfacing it as a
+   * blank card.
    */
   async getSavedGames(userId: string): Promise<unknown[]> {
     const user = await this.userModel
@@ -356,7 +380,9 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    return (user.saved_games as unknown[]).filter((g) => g != null).reverse();
+    return (user.saved_games as unknown[])
+      .filter((g) => g != null && typeof g === 'object')
+      .reverse();
   }
 
   /** Fetch the public view of an active user, or 404 if missing/deleted. */
@@ -383,7 +409,6 @@ export class UsersService {
       games_joined: user.games_joined.length,
     };
   }
-
 
   async isUsernameTaken(username: string): Promise<boolean>{
     const existing = await this.userModel
