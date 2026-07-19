@@ -41,7 +41,6 @@ import { UpdateGameDto } from './dto/update-game.dto';
 import { JoinGameDto } from './dto/join-game.dto';
 import { ListGamesDto } from './dto/list-games.dto';
 import { MyGamesDto } from './dto/my-games.dto';
-import { RateGameDto } from './dto/rate-game.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UserDocument } from '../users/schemas/user.schema';

@@ -410,20 +410,6 @@ export class UsersService {
     };
   }
 
-
-  /**
-   * Nudge a user's reputation by `delta` (positive or negative), clamped to the
-   * schema's 0.0-5.0 range. Used by post-game ratings; a missing user is a
-   * silent no-op since the caller (rating flow) already validated the id came
-   * from a real roster entry moments earlier.
-   */
-  async adjustReputation(userId: string, delta: number): Promise<void> {
-    const user = await this.findActiveById(userId);
-    if (!user) return;
-    const next = Math.max(0, Math.min(5, user.reputation + delta));
-    await this.userModel.updateOne({ _id: userId }, { reputation: next }).exec();
-  }
-
   async isUsernameTaken(username: string): Promise<boolean>{
     const existing = await this.userModel
       .findOne({ username, deleted_at: null })

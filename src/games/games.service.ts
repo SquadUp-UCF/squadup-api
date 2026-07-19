@@ -636,63 +636,6 @@ export class GamesService {
     await this.usersService.removeCreatedGame(userId, game.id);
   }
 
-  /**
-   * Submit thumbs up/down ratings for the other players of a completed game.
-   * The caller must have actually played (host or joined participant); ratees
-   * who weren't joined participants (guests, non-participants, the caller
-   * themselves) are silently dropped rather than rejected, since the client
-   * only ever offers valid ratees anyway. One submission per caller per game —
-   * a second attempt is rejected outright rather than allowed to overwrite.
-   */
-  async rateGame(id: string, callerId: string, dto: RateGameDto): Promise<GameDocument> {
-    const validated = await validateDto(RateGameDto, dto);
-    const game = await this.findByIdOrFail(id);
-
-    if (game.status !== GameStatus.Completed) {
-      throw new BadRequestException('Game is not completed yet');
-    }
-    const callerPlayed = game.participants.some(
-      (p) => p.user?.toString() === callerId && p.status === ParticipantStatus.Joined,
-    );
-    if (!callerPlayed) {
-      throw new BadRequestException('You did not play in this game');
-    }
-    if (game.rated_by.some((u) => u.toString() === callerId)) {
-      throw new BadRequestException('You already rated this game');
-    }
-
-    const ratablePlayerIds = new Set(
-      game.participants
-        .filter((p) => p.status === ParticipantStatus.Joined && p.user && p.user.toString() !== callerId)
-        .map((p) => p.user!.toString()),
-    );
-
-    for (const rating of validated.ratings) {
-      if (!ratablePlayerIds.has(rating.user)) continue;
-      await this.usersService.adjustReputation(rating.user, rating.value === 'up' ? 0.1 : -0.1);
-    }
-
-    game.rated_by.push(callerId as unknown as GameDocument['rated_by'][number]);
-    return game.save();
-  }
-
-  /**
-   * Completed games the caller played in (host or joined participant) but
-   * hasn't submitted ratings for yet, most recently started first.
-   */
-  getPendingRatings(callerId: string): Promise<GameDocument[]> {
-    return this.gameModel
-      .find({
-        status: GameStatus.Completed,
-        rated_by: { $ne: callerId },
-        participants: {
-          $elemMatch: { user: callerId, status: ParticipantStatus.Joined },
-        },
-      })
-      .sort({ start_time: -1 })
-      .exec();
-  }
-
   // --- helpers -------------------------------------------------------------
 
   private isTerminal(game: GameDocument): boolean {
