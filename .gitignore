@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# Jest's HTML/lcov report — `npm run test:cov` writes it here (rootDir is src,
+# coverageDirectory is ../coverage), regenerated on every run.
+coverage/
 .env
 *.log
 .DS_Store
