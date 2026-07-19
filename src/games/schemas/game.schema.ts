@@ -138,6 +138,12 @@ export class Game {
 
   @Prop()
   photo_url?: string;
+
+  // Users who have already submitted post-game ratings for this game — lets
+  // `GET /games/pending-ratings` skip games a caller already rated, and blocks
+  // a second submission from the same rater.
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
+  rated_by: Types.ObjectId[];
 }
 
 export const GameSchema = SchemaFactory.createForClass(Game);

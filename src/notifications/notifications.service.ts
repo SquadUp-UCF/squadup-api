@@ -114,4 +114,11 @@ export class NotificationsService {
       { read: true },
     ).exec();
   }
+
+  /** Permanently delete every notification row for the user ("clear all"). */
+  async clearAll(userId: string): Promise<void> {
+    await this.notificationModel
+      .deleteMany({ userId: new Types.ObjectId(userId) })
+      .exec();
+  }
 }

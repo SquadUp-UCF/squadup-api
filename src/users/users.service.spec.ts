@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
+import { Types } from 'mongoose';
 import {
   BadRequestException,
   ConflictException,
@@ -192,30 +193,35 @@ describe('UsersService', () => {
   });
 
   describe('game membership helpers', () => {
+    // A real ObjectId hex string — these ids get cast via `new
+    // Types.ObjectId(...)` before hitting the query (see `saveGame`'s
+    // comment for why passing the raw string through isn't safe to rely on).
+    const gameId = '507f1f77bcf86cd799439011';
+
     it('adds a hosted game with $addToSet', async () => {
       model.updateOne.mockReturnValue(queryStub({ modifiedCount: 1 }));
-      await service.addCreatedGame('user-id', 'game-id');
+      await service.addCreatedGame('user-id', gameId);
       expect(model.updateOne).toHaveBeenCalledWith(
         { _id: 'user-id' },
-        { $addToSet: { games_created: 'game-id' } },
+        { $addToSet: { games_created: new Types.ObjectId(gameId) } },
       );
     });
 
     it('adds a joined game with $addToSet', async () => {
       model.updateOne.mockReturnValue(queryStub({ modifiedCount: 1 }));
-      await service.addJoinedGame('user-id', 'game-id');
+      await service.addJoinedGame('user-id', gameId);
       expect(model.updateOne).toHaveBeenCalledWith(
         { _id: 'user-id' },
-        { $addToSet: { games_joined: 'game-id' } },
+        { $addToSet: { games_joined: new Types.ObjectId(gameId) } },
       );
     });
 
     it('removes a joined game with $pull', async () => {
       model.updateOne.mockReturnValue(queryStub({ modifiedCount: 1 }));
-      await service.removeJoinedGame('user-id', 'game-id');
+      await service.removeJoinedGame('user-id', gameId);
       expect(model.updateOne).toHaveBeenCalledWith(
         { _id: 'user-id' },
-        { $pull: { games_joined: 'game-id' } },
+        { $pull: { games_joined: new Types.ObjectId(gameId) } },
       );
     });
   });
@@ -368,7 +374,7 @@ describe('UsersService', () => {
 
       expect(model.findOneAndUpdate).toHaveBeenCalledWith(
         { _id: 'user-id', deleted_at: null },
-        { $addToSet: { saved_games: gameId } },
+        { $addToSet: { saved_games: new Types.ObjectId(gameId) } },
         { new: true },
       );
       expect(result.saved_games).toContain(gameId);
@@ -383,7 +389,7 @@ describe('UsersService', () => {
 
       expect(model.findOneAndUpdate).toHaveBeenCalledWith(
         { _id: 'user-id', deleted_at: null },
-        { $pull: { saved_games: gameId } },
+        { $pull: { saved_games: new Types.ObjectId(gameId) } },
         { new: true },
       );
     });
