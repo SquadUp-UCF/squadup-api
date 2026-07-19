@@ -6,6 +6,7 @@ import { Game, GameSkillLevel, GameStatus, ParticipantStatus } from './schemas/g
 import { MyGamesRole } from './dto/my-games.dto';
 import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/schemas/notification.schema';
 import { bannerForSport } from './sport-banners';
 
 /** Query stub whose `.exec()` resolves to `result`; `.sort()` chains. */
@@ -32,6 +33,7 @@ function makeGame(overrides: Record<string, any> = {}) {
     participants: [
       { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
     ],
+    rated_by: [],
     ...overrides,
   };
   game.save = jest.fn().mockResolvedValue(game);
@@ -55,6 +57,7 @@ describe('GamesService', () => {
     addCreatedGame: jest.Mock;
     addJoinedGame: jest.Mock;
     removeJoinedGame: jest.Mock;
+    adjustReputation: jest.Mock;
   };
   let notifications: { sendToUser: jest.Mock };
 
@@ -64,6 +67,7 @@ describe('GamesService', () => {
       addCreatedGame: jest.fn().mockResolvedValue(undefined),
       addJoinedGame: jest.fn().mockResolvedValue(undefined),
       removeJoinedGame: jest.fn().mockResolvedValue(undefined),
+      adjustReputation: jest.fn().mockResolvedValue(undefined),
     };
     notifications = { sendToUser: jest.fn().mockResolvedValue(undefined) };
 
@@ -159,7 +163,8 @@ describe('GamesService', () => {
         expect.objectContaining({
           participants: [
             { user: 'host-id', status: ParticipantStatus.Joined },
-            { name: 'Sam Lee', status: ParticipantStatus.Joined },
+            // Attributed to the host, so `leave` can tell whose guest is whose.
+            { name: 'Sam Lee', status: ParticipantStatus.Joined, added_by: 'host-id' },
           ],
         }),
       );
@@ -187,7 +192,12 @@ describe('GamesService', () => {
         expect.objectContaining({
           participants: [
             { user: 'host-id', status: ParticipantStatus.Joined },
-            { name: 'Sam Lee', status: ParticipantStatus.Joined, position: 'Goalkeeper' },
+            {
+              name: 'Sam Lee',
+              status: ParticipantStatus.Joined,
+              added_by: 'host-id',
+              position: 'Goalkeeper',
+            },
           ],
         }),
       );
@@ -444,6 +454,69 @@ describe('GamesService', () => {
       expect(users.removeJoinedGame).toHaveBeenCalledWith('u2', 'game-id');
     });
 
+    it('takes the guests the leaver brought off the roster with them', async () => {
+      const game = makeGame({
+        max_players: 6,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { name: "host's guest", status: ParticipantStatus.Joined, added_by: 'host-id', joined_at: new Date() },
+          { user: 'u2', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { name: 'u2 guest one', status: ParticipantStatus.Joined, added_by: 'u2', joined_at: new Date() },
+          { name: 'u2 guest two', status: ParticipantStatus.Joined, added_by: 'u2', joined_at: new Date() },
+          { name: 'u3 guest', status: ParticipantStatus.Joined, added_by: 'u3', joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.leave('game-id', 'u2');
+
+      // u2's two guests are gone; everyone else's roster entry survives.
+      expect(game.participants.map((p: any) => p.name ?? p.user)).toEqual([
+        'host-id',
+        "host's guest",
+        'u2',
+        'u3 guest',
+      ]);
+      // The leaver themselves is cancelled rather than removed.
+      expect(game.participants[2].status).toBe(ParticipantStatus.Cancelled);
+    });
+
+    it('leaves guests that predate added_by for the host to clear', async () => {
+      const game = makeGame({
+        max_players: 6,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'u2', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { name: 'unattributed guest', status: ParticipantStatus.Joined, joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.leave('game-id', 'u2');
+
+      expect(game.participants).toHaveLength(3);
+      expect(game.participants[2].name).toBe('unattributed guest');
+    });
+
+    it('frees the spots the departing guests were holding', async () => {
+      const game = makeGame({
+        status: GameStatus.Locked,
+        min_players: 2,
+        max_players: 3,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'u2', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { name: 'u2 guest', status: ParticipantStatus.Joined, added_by: 'u2', joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.leave('game-id', 'u2');
+
+      // Was full at 3/3; the guest leaving with u2 must not keep it locked.
+      expect(game.status).toBe(GameStatus.Open);
+    });
+
     it('forbids the host from leaving', async () => {
       const game = makeGame();
       model.findById.mockReturnValue(queryStub(game));
@@ -548,6 +621,7 @@ describe('GamesService', () => {
       const game = makeGame({
         participants: [
           { user: 'host-id', status: ParticipantStatus.Joined },
+          // No added_by (predates the field), so nobody but the host owns it.
           { name: 'Sam', status: ParticipantStatus.Joined },
         ],
       });
@@ -555,6 +629,57 @@ describe('GamesService', () => {
       await expect(
         service.removeGuest('game-id', 'stranger', 1),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets the player who brought a guest remove them', async () => {
+      const game = makeGame({
+        status: GameStatus.Locked,
+        min_players: 2,
+        max_players: 3,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { user: 'u2', status: ParticipantStatus.Joined },
+          { name: 'u2 guest', status: ParticipantStatus.Joined, added_by: 'u2' },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.removeGuest('game-id', 'u2', 2);
+
+      expect(game.participants).toHaveLength(2);
+      // The freed spot reopens a game that was full.
+      expect(game.status).toBe(GameStatus.Confirmed);
+    });
+
+    it("forbids a player from removing someone else's guest", async () => {
+      const game = makeGame({
+        max_players: 4,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { user: 'u2', status: ParticipantStatus.Joined },
+          { name: 'u3 guest', status: ParticipantStatus.Joined, added_by: 'u3' },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+      await expect(
+        service.removeGuest('game-id', 'u2', 2),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('still lets the host remove a guest somebody else brought', async () => {
+      const game = makeGame({
+        max_players: 4,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { user: 'u2', status: ParticipantStatus.Joined },
+          { name: 'u2 guest', status: ParticipantStatus.Joined, added_by: 'u2' },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.removeGuest('game-id', 'host-id', 2);
+
+      expect(game.participants).toHaveLength(2);
     });
   });
 
@@ -643,6 +768,87 @@ describe('GamesService', () => {
       await service.update('game-id', 'host-id', { sport: 'tennis' });
       expect(game.photo_url).toBe(custom);
     });
+
+    it('notifies the roster (but not the editing host) when the time changes', async () => {
+      const game = makeGame({
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'player-1', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'player-2', status: ParticipantStatus.Cancelled, joined_at: new Date() },
+          { name: 'Guest', status: ParticipantStatus.Joined, joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.update('game-id', 'host-id', {
+        start_time: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(),
+      });
+
+      // Only the joined, registered, non-host player is reachable.
+      expect(notifications.sendToUser).toHaveBeenCalledTimes(1);
+      expect(notifications.sendToUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'player-1',
+          type: NotificationType.GameUpdated,
+          gameId: 'game-id',
+          body: 'The soccer game you joined changed its time.',
+        }),
+      );
+    });
+
+    it('names every changed detail in one notification', async () => {
+      const game = makeGame({
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'player-1', status: ParticipantStatus.Joined, joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.update('game-id', 'host-id', {
+        start_time: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(),
+        location: 'Field 7',
+        sport: 'tennis',
+      });
+
+      expect(notifications.sendToUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: 'The soccer game you joined changed its time, location and sport.',
+        }),
+      );
+    });
+
+    it('stays quiet when the edit only touches cosmetic fields', async () => {
+      const game = makeGame({
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'player-1', status: ParticipantStatus.Joined, joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.update('game-id', 'host-id', { description: 'Bring water' });
+
+      expect(notifications.sendToUser).not.toHaveBeenCalled();
+    });
+
+    it('stays quiet when an edit re-sends the same values', async () => {
+      const game = makeGame({
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: 'player-1', status: ParticipantStatus.Joined, joined_at: new Date() },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.update('game-id', 'host-id', {
+        location: game.location,
+        sport: game.sport,
+        start_time: game.start_time.toISOString(),
+      });
+
+      expect(notifications.sendToUser).not.toHaveBeenCalled();
+    });
   });
 
   describe('cancel / complete', () => {
@@ -674,6 +880,67 @@ describe('GamesService', () => {
       await expect(service.complete('game-id', 'host-id')).rejects.toBeInstanceOf(
         BadRequestException,
       );
+    });
+  });
+
+  describe('rateGame', () => {
+    // Ratee ids must be valid ObjectIds (the DTO enforces @IsMongoId).
+    const HOST = '507f1f77bcf86cd799439011';
+    const U2 = '507f1f77bcf86cd799439012';
+    const STRANGER = '507f1f77bcf86cd799439013';
+    const completedGame = () =>
+      makeGame({
+        host: HOST,
+        status: GameStatus.Completed,
+        participants: [
+          { user: HOST, status: ParticipantStatus.Joined, joined_at: new Date() },
+          { user: U2, status: ParticipantStatus.Joined, joined_at: new Date() },
+        ],
+        rated_by: [],
+      });
+
+    it('records the rater and adjusts the ratee reputation', async () => {
+      const game = completedGame();
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.rateGame('game-id', U2, { ratings: [{ user: HOST, value: 'up' }] });
+
+      expect(users.adjustReputation).toHaveBeenCalledWith(HOST, 0.1);
+      expect(game.rated_by).toContain(U2);
+      expect(game.save).toHaveBeenCalled();
+    });
+
+    it('rejects rating a game that is not completed', async () => {
+      const game = makeGame({ status: GameStatus.Open });
+      model.findById.mockReturnValue(queryStub(game));
+      await expect(
+        service.rateGame('game-id', 'host-id', { ratings: [] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('forbids a non-participant from rating', async () => {
+      const game = completedGame();
+      model.findById.mockReturnValue(queryStub(game));
+      await expect(
+        service.rateGame('game-id', STRANGER, { ratings: [] }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('rejects rating the same game twice', async () => {
+      const game = completedGame();
+      game.rated_by = [U2];
+      model.findById.mockReturnValue(queryStub(game));
+      await expect(
+        service.rateGame('game-id', U2, { ratings: [] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('ignores ratings for players not in the game', async () => {
+      const game = completedGame();
+      model.findById.mockReturnValue(queryStub(game));
+      await service.rateGame('game-id', U2, { ratings: [{ user: STRANGER, value: 'down' }] });
+      expect(users.adjustReputation).not.toHaveBeenCalled();
+      expect(game.rated_by).toContain(U2);
     });
   });
 });

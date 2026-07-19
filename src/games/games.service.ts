@@ -42,6 +42,9 @@ const TERMINAL_STATUSES: GameStatus[] = [
 // long session (double-headers, extra innings) without leaving stale games up.
 const DISCOVERY_GRACE_MS = 4 * 60 * 60 * 1000;
 
+// How much a single thumbs up/down nudges a rated player's 0–5 reputation.
+const RATING_DELTA = { up: 0.1, down: -0.2 } as const;
+
 @Injectable()
 export class GamesService {
   constructor(
@@ -95,6 +98,7 @@ export class GamesService {
         ...guests.map((g) => ({
           name: g.name,
           status: ParticipantStatus.Joined,
+          added_by: hostId,
           ...(g.position ? { position: g.position } : {}),
         })),
       ],
@@ -194,7 +198,16 @@ export class GamesService {
     }
 
     const prevPhoto = game.photo_url;
-    const prevStatus = game.status;
+    // Snapshot the details a player plans around, so an edit to any of them can
+    // be announced to the roster below. Read before Object.assign, and compared
+    // against the DTO rather than the doc (start_time is still an ISO string
+    // in memory until Mongoose casts it on save).
+    const before = {
+      sport: game.sport,
+      location: game.location,
+      start_time: game.start_time?.getTime(),
+    };
+
     Object.assign(game, dto);
 
     // Keep the banner in step with the sport when it's still a stock default
@@ -215,10 +228,47 @@ export class GamesService {
 
     this.recomputeStatus(game);
     const saved = await game.save();
-    // e.g. lowering max_players can lock an already-full-enough game, or
-    // raising min_players can (rarely) push an already-confirmed game back to
-    // confirmed-worthy on a different edit — same notification as join/addGuest.
-    this.notifyStatusChange(saved, prevStatus);
+
+    const changes: string[] = [];
+    if (dto.start_time !== undefined && new Date(dto.start_time).getTime() !== before.start_time) {
+      changes.push('time');
+    }
+    if (dto.location !== undefined && dto.location !== before.location) {
+      changes.push('location');
+    }
+    if (dto.sport !== undefined && dto.sport !== before.sport) {
+      changes.push('sport');
+    }
+
+    // Only the details a player plans around are worth interrupting them for —
+    // a description or banner tweak isn't. The host made the edit, so they're
+    // skipped even if they're on their own roster.
+    if (changes.length > 0) {
+      const summary =
+        changes.length === 1
+          ? changes[0]
+          : `${changes.slice(0, -1).join(', ')} and ${changes[changes.length - 1]}`;
+
+      const roster = saved.participants
+        .filter(
+          (p) =>
+            p.status === ParticipantStatus.Joined &&
+            p.user &&
+            p.user.toString() !== userId,
+        )
+        .map((p) => p.user!.toString());
+
+      for (const participantId of roster) {
+        this.notificationsService.sendToUser({
+          userId: participantId,
+          type: NotificationType.GameUpdated,
+          title: 'Game updated',
+          body: `The ${before.sport} game you joined changed its ${summary}.`,
+          gameId: saved.id,
+        }).catch(() => {});
+      }
+    }
+
     return saved;
   }
 
@@ -231,7 +281,14 @@ export class GamesService {
    */
   async join(id: string, userId: string, payload: JoinGameDto = {}): Promise<GameDocument> {
     const dto = await validateDto(JoinGameDto, payload);
-    const partySize = dto.party_size ?? 1;
+    // Named guests the caller brings; each is its own roster entry (party_size
+    // 1). When guests are given, the caller counts as 1 and party_size is
+    // ignored — otherwise fall back to the anonymous party_size headcount.
+    const guests = (dto.guests ?? [])
+      .map((g) => ({ name: g.name?.trim() ?? '', position: g.position?.trim() || undefined }))
+      .filter((g) => g.name.length > 0);
+    const partySize = guests.length > 0 ? 1 : dto.party_size ?? 1;
+    const needed = partySize + guests.length;
     const game = await this.findByIdOrFail(id);
 
     if (game.status === GameStatus.Locked) {
@@ -252,7 +309,7 @@ export class GamesService {
     }
 
     const remaining = game.max_players - this.activePartySize(game);
-    if (partySize > remaining) {
+    if (needed > remaining) {
       throw new BadRequestException(
         remaining <= 0
           ? 'Game is full'
@@ -271,6 +328,18 @@ export class GamesService {
         joined_at: new Date(),
         party_size: partySize,
       });
+    }
+
+    for (const g of guests) {
+      game.participants.push({
+        name: g.name,
+        status: ParticipantStatus.Joined,
+        joined_at: new Date(),
+        party_size: 1,
+        added_by: userId,
+        ...(g.position ? { position: g.position } : {}),
+        // Mongoose casts the id strings on save, as with `user` above.
+      } as unknown as GameDocument['participants'][number]);
     }
 
     const prevStatus = game.status;
@@ -311,6 +380,20 @@ export class GamesService {
     }
 
     participant.status = ParticipantStatus.Cancelled;
+
+    // Guests leave with whoever brought them — they have no account of their
+    // own, and only the host can remove a guest, so leaving them behind would
+    // strand them on the roster taking up spots nobody can free. Dropped
+    // outright rather than cancelled: unlike a player, a guest entry carries
+    // no history worth keeping. Guests predating `added_by` can't be
+    // attributed and so stay for the host to clear.
+    for (let i = game.participants.length - 1; i >= 0; i--) {
+      const p = game.participants[i];
+      if (!p.user && p.added_by?.toString() === userId) {
+        game.participants.splice(i, 1);
+      }
+    }
+
     this.recomputeStatus(game);
     await game.save();
     await this.usersService.removeJoinedGame(userId, game.id);
@@ -351,6 +434,7 @@ export class GamesService {
     game.participants.push({
       name,
       status: ParticipantStatus.Joined,
+      added_by: userId,
       ...(position ? { position } : {}),
     } as unknown as GameDocument['participants'][number]);
 
@@ -372,12 +456,22 @@ export class GamesService {
     index: number,
   ): Promise<GameDocument> {
     const game = await this.findByIdOrFail(id);
-    this.assertHost(game, userId);
     this.assertNotTerminal(game);
 
     const participant = game.participants[index];
     if (!participant || participant.user) {
       throw new BadRequestException('No guest at that position on the roster');
+    }
+
+    // The host manages the whole roster; anyone else may only take back a
+    // guest they brought themselves. Guests predating `added_by` have no
+    // owner on record, so they stay host-only.
+    const isHost = game.host.toString() === userId;
+    const broughtThem = participant.added_by?.toString() === userId;
+    if (!isHost && !broughtThem) {
+      throw new ForbiddenException(
+        'Only the host or the player who added this guest can remove them',
+      );
     }
 
     game.participants.splice(index, 1);
@@ -469,6 +563,63 @@ export class GamesService {
     }
 
     return saved;
+  }
+
+  /**
+   * Record a player's thumbs up/down for the other participants of a completed
+   * game. Each rating nudges the rated user's reputation; the rater is recorded
+   * in `rated_by` so they can't rate the same game twice.
+   */
+  async rateGame(id: string, raterId: string, payload: RateGameDto): Promise<GameDocument> {
+    const dto = await validateDto(RateGameDto, payload);
+    const game = await this.findByIdOrFail(id);
+
+    if (game.status !== GameStatus.Completed) {
+      throw new BadRequestException('You can only rate a completed game');
+    }
+    const isParticipant = game.participants.some(
+      (p) => p.user?.toString() === raterId && p.status === ParticipantStatus.Joined,
+    );
+    if (!isParticipant) {
+      throw new ForbiddenException('Only players in this game can rate it');
+    }
+    if (game.rated_by.some((u) => u.toString() === raterId)) {
+      throw new BadRequestException('You have already rated this game');
+    }
+
+    // Only joined, registered participants other than the rater can be rated.
+    const rateable = new Set(
+      game.participants
+        .filter((p) => p.user && p.status === ParticipantStatus.Joined)
+        .map((p) => p.user!.toString())
+        .filter((uid) => uid !== raterId),
+    );
+
+    for (const r of dto.ratings) {
+      if (rateable.has(r.user)) {
+        await this.usersService.adjustReputation(r.user, RATING_DELTA[r.value]);
+      }
+    }
+
+    game.rated_by.push(raterId as unknown as GameDocument['rated_by'][number]);
+    return game.save();
+  }
+
+  /**
+   * Completed games the user played in but hasn't rated yet — drives the
+   * "rate your teammates" prompt when they open the app or refresh the feed.
+   */
+  findPendingRatings(userId: string): Promise<GameDocument[]> {
+    return this.gameModel
+      .find({
+        status: GameStatus.Completed,
+        participants: {
+          $elemMatch: { user: userId, status: ParticipantStatus.Joined },
+        },
+        rated_by: { $ne: userId },
+      })
+      .sort({ updatedAt: -1 })
+      .exec();
   }
 
   /**

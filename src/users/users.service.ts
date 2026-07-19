@@ -298,6 +298,24 @@ export class UsersService {
   }
 
   /**
+   * Nudge a user's reputation by `delta`, clamped to the 0–5 scale. Uses an
+   * aggregation-pipeline update so the read + clamp + write is atomic.
+   */
+  async adjustReputation(userId: string, delta: number): Promise<void> {
+    await this.userModel
+      .updateOne({ _id: userId }, [
+        {
+          $set: {
+            reputation: {
+              $max: [0, { $min: [5, { $add: ['$reputation', delta] }] }],
+            },
+          },
+        },
+      ])
+      .exec();
+  }
+
+  /**
    * Bookmark a game for the user ("save"). Idempotent via `$addToSet`, so
    * saving an already-saved game is a no-op. Returns the updated user so the
    * caller sees the new `saved_games`. Saving never touches the game's roster.

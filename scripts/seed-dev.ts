@@ -50,7 +50,6 @@ function isLocalUri(uri: string): boolean {
 
 const TEST_EMAIL = 'test@ucf.edu';
 const TEST_PASSWORD = 'Test1234!';
-const UCF = { latitude: 28.6024, longitude: -81.2001 };
 
 async function main() {
   const env = loadEnv();
@@ -111,17 +110,38 @@ async function main() {
     console.log(`Created test user (${TEST_EMAIL}).`);
   }
 
-  // --- Sample games (only if none seeded yet) ----------------------------
+  // --- Sample games ------------------------------------------------------
+  // Spread across UCF main campus with distinct coordinates (so map pins don't
+  // stack), a mix of sports (including flag football + spikeball), skill levels,
+  // and some pre-added guest players with positions — enough to exercise the
+  // feed, filters, sort, map, banners, positions, and saving.
   const hours = (n: number) => new Date(Date.now() + n * 60 * 60 * 1000);
+  const host = (position?: string) => ({
+    user: userId,
+    status: 'joined',
+    joined_at: now,
+    ...(position ? { position } : {}),
+  });
+  const guest = (name: string, position?: string) => ({
+    name,
+    status: 'joined',
+    joined_at: now,
+    ...(position ? { position } : {}),
+  });
+
   const sampleGames = [
     {
-      // Started 30 min ago → shows the blinking "live" indicator on the map.
+      // Started 30 min ago → shows the "LIVE" badge.
       sport: 'volleyball',
       description: 'Sand volleyball happening right now — hop in!',
       location: 'UCF Sand Volleyball Courts',
       start_time: hours(-0.5),
       min_players: 4,
       max_players: 12,
+      latitude: 28.6046,
+      longitude: -81.1965,
+      skill_level: 'beginner',
+      participants: [host('Setter'), guest('Jordan', 'Libero')],
     },
     {
       sport: 'basketball',
@@ -130,6 +150,34 @@ async function main() {
       start_time: hours(3),
       min_players: 4,
       max_players: 10,
+      latitude: 28.6036,
+      longitude: -81.1974,
+      skill_level: 'intermediate',
+      participants: [host('Point Guard'), guest('Marcus', 'Center')],
+    },
+    {
+      sport: 'football', // displays as "Flag Football" in the app
+      description: 'Intramural flag football — 5v5. Bring a light and dark shirt.',
+      location: 'Memory Mall, UCF',
+      start_time: hours(5),
+      min_players: 6,
+      max_players: 10,
+      latitude: 28.6019,
+      longitude: -81.2003,
+      skill_level: 'all',
+      participants: [host('Quarterback'), guest('Alex', 'Wide Receiver'), guest('Sam')],
+    },
+    {
+      sport: 'spikeball',
+      description: '2v2 roundnet on the lawn. Beginners welcome!',
+      location: 'Memory Mall Lawn, UCF',
+      start_time: hours(2),
+      min_players: 2,
+      max_players: 4,
+      latitude: 28.6024,
+      longitude: -81.2011,
+      skill_level: 'beginner',
+      participants: [host()],
     },
     {
       sport: 'soccer',
@@ -138,6 +186,10 @@ async function main() {
       start_time: hours(26),
       min_players: 6,
       max_players: 14,
+      latitude: 28.6075,
+      longitude: -81.1906,
+      skill_level: 'all',
+      participants: [host('Midfielder')],
     },
     {
       sport: 'tennis',
@@ -146,30 +198,55 @@ async function main() {
       start_time: hours(50),
       min_players: 2,
       max_players: 4,
+      latitude: 28.6039,
+      longitude: -81.1957,
+      skill_level: 'pro',
+      participants: [host('Doubles')],
+    },
+    {
+      sport: 'baseball',
+      description: 'Weekend pickup at the ballfields.',
+      location: 'UCF Baseball Complex',
+      start_time: hours(30),
+      min_players: 6,
+      max_players: 18,
+      latitude: 28.6090,
+      longitude: -81.1929,
+      skill_level: 'intermediate',
+      participants: [host('Pitcher'), guest('Chris', 'Catcher')],
+    },
+    {
+      sport: 'table-tennis',
+      description: 'Ping pong in the Student Union game room.',
+      location: 'Student Union Game Room, UCF',
+      start_time: hours(6),
+      min_players: 2,
+      max_players: 4,
+      latitude: 28.6019,
+      longitude: -81.1996,
+      skill_level: 'all',
+      participants: [host('Singles')],
     },
   ];
 
-  const seededCount = await games.countDocuments({ host: userId });
-  if (seededCount === 0) {
-    const docs = sampleGames.map((g) => ({
-      host: userId,
-      ...g,
-      latitude: UCF.latitude,
-      longitude: UCF.longitude,
-      status: 'open',
-      participants: [{ user: userId, status: 'joined', joined_at: now }],
-      createdAt: now,
-      updatedAt: now,
-    }));
-    const res = await games.insertMany(docs);
-    await users.updateOne(
-      { _id: userId },
-      { $set: { games_created: Object.values(res.insertedIds) } },
-    );
-    console.log(`Inserted ${docs.length} sample games.`);
-  } else {
-    console.log(`Test user already hosts ${seededCount} game(s) — skipping game seed.`);
-  }
+  // Re-seedable: clear only this test user's games, then insert the fresh set.
+  await games.deleteMany({ host: userId });
+  const docs = sampleGames.map((g) => ({
+    host: userId,
+    ...g,
+    // Point at the sport's stock banner (served by the API at /api/sports/…),
+    // matching what the create endpoint sets so the app shows real banners.
+    photo_url: `/sports/${g.sport}.jpg`,
+    status: 'open',
+    createdAt: now,
+    updatedAt: now,
+  }));
+  const res = await games.insertMany(docs);
+  await users.updateOne(
+    { _id: userId },
+    { $set: { games_created: Object.values(res.insertedIds) } },
+  );
+  console.log(`Inserted ${docs.length} sample games across UCF campus.`);
 
   console.log('\nDone. Log in with:');
   console.log(`  email:    ${TEST_EMAIL}`);

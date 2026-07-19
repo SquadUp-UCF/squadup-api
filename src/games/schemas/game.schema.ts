@@ -66,6 +66,15 @@ export class Participant {
   @Prop({ type: String })
   position?: string;
 
+  // For a guest, the account that put them on the roster — the host who
+  // pre-added them, or the player who brought them along. Without it a guest
+  // can't be traced back to anyone, so a player leaving would strand the
+  // guests they brought on the roster with no way to remove them.
+  // Absent on registered players (they are their own entry) and on guests
+  // created before this field existed.
+  @Prop({ type: Types.ObjectId, ref: 'User', required: false })
+  added_by?: Types.ObjectId;
+
   @Prop({
     type: String,
     enum: ParticipantStatus,
@@ -139,9 +148,14 @@ export class Game {
   @Prop()
   photo_url?: string;
 
+<<<<<<< HEAD
   // Users who have already submitted post-game ratings for this game — lets
   // `GET /games/pending-ratings` skip games a caller already rated, and blocks
   // a second submission from the same rater.
+=======
+  // Users who have submitted their player ratings for this (completed) game.
+  // Prevents double-rating and drives the "games awaiting your rating" prompt.
+>>>>>>> 9dc8722731ef18d5fcb84271b24c3d72aff44029
   @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
   rated_by: Types.ObjectId[];
 }

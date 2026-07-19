@@ -11,6 +11,7 @@ export enum NotificationType {
   GameStartingSoon = 'game_starting_soon',
   GameCancelled = 'game_cancelled',
   GameCompleted = 'game_completed',
+  GameUpdated = 'game_updated',
 }
 
 @Schema({ timestamps: true })
@@ -36,3 +37,6 @@ export class Notification {
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);
 NotificationSchema.index({ userId: 1, read: 1, createdAt: -1 });
+// Backs the collapse lookup in NotificationsService.sendToUser, which folds a
+// repeat event into the existing unread row for the same game.
+NotificationSchema.index({ userId: 1, type: 1, gameId: 1, read: 1 });

@@ -35,6 +35,7 @@ import {
 } from '@nestjs/swagger';
 import { GamesService } from './games.service';
 import { CreateGameDto, InitialPlayerDto } from './dto/create-game.dto';
+import { RateGameDto } from './dto/rate-game.dto';
 import { SetPositionDto } from './dto/set-position.dto';
 import { UpdateGameDto } from './dto/update-game.dto';
 import { JoinGameDto } from './dto/join-game.dto';
@@ -77,10 +78,10 @@ export class GamesController {
 
   // Declared before `:id` so "pending-ratings" isn't captured as a game id.
   @Get('pending-ratings')
-  @ApiOperation({ summary: "Completed games the caller hasn't rated yet" })
-  @ApiResponse({ status: 200, description: 'Completed games awaiting the caller\'s ratings.' })
+  @ApiOperation({ summary: "Completed games the caller still needs to rate" })
+  @ApiResponse({ status: 200, description: 'Games awaiting the caller\'s ratings.' })
   findPendingRatings(@CurrentUser() user: UserDocument) {
-    return this.gamesService.getPendingRatings(user.id);
+    return this.gamesService.findPendingRatings(user.id);
   }
 
   @Get(':id')
@@ -143,10 +144,16 @@ export class GamesController {
 
   @Delete(':id/guests/:index')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Remove a guest from the roster by index (host only)' })
+  @ApiOperation({
+    summary:
+      'Remove a guest from the roster by index (the host, or whoever added them)',
+  })
   @ApiResponse({ status: 200, description: 'The updated game.' })
   @ApiResponse({ status: 400, description: 'No guest at that index.' })
-  @ApiResponse({ status: 403, description: 'Only the host can remove guests.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Not the host, and not the player who added this guest.',
+  })
   removeGuest(
     @CurrentUser() user: UserDocument,
     @Param('id') id: string,
@@ -187,14 +194,11 @@ export class GamesController {
 
   @Post(':id/ratings')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Rate the other players of a completed game' })
-  @ApiResponse({ status: 200, description: 'The game (rating recorded).' })
-  @ApiResponse({ status: 400, description: 'Game not completed, caller did not play, or already rated.' })
-  rate(
-    @CurrentUser() user: UserDocument,
-    @Param('id') id: string,
-    @Body() dto: RateGameDto,
-  ) {
+  @ApiOperation({ summary: "Rate the other players of a completed game (thumbs up/down)" })
+  @ApiResponse({ status: 200, description: 'The game, now recorded as rated by the caller.' })
+  @ApiResponse({ status: 400, description: 'Game not completed, or already rated.' })
+  @ApiResponse({ status: 403, description: 'Only players in the game can rate it.' })
+  rate(@CurrentUser() user: UserDocument, @Param('id') id: string, @Body() dto: RateGameDto) {
     return this.gamesService.rateGame(id, user.id, dto);
   }
 }
