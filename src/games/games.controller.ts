@@ -129,10 +129,10 @@ export class GamesController {
   }
 
   @Post(':id/guests')
-  @ApiOperation({ summary: 'Add a guest player to the roster (host only)' })
+  @ApiOperation({ summary: 'Add a guest player to the roster (host or any joined player)' })
   @ApiResponse({ status: 201, description: 'The updated game.' })
   @ApiResponse({ status: 400, description: 'Game full/started/terminal, or invalid guest.' })
-  @ApiResponse({ status: 403, description: 'Only the host can add guests.' })
+  @ApiResponse({ status: 403, description: 'Only the host or a joined player can add guests.' })
   addGuest(
     @CurrentUser() user: UserDocument,
     @Param('id') id: string,

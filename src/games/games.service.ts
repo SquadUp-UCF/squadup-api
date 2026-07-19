@@ -401,9 +401,12 @@ export class GamesService {
   }
 
   /**
-   * Host-only: add a guest player (someone who may not have an account) to an
-   * existing game's roster — the same kind of entry the host can seed at
-   * creation. A guest counts toward min/max like any player.
+   * Add a guest player (someone who may not have an account) to an existing
+   * game's roster — the same kind of entry the host can seed at creation.
+   * Open to the host or any already-joined registered player, not just the
+   * host: a player brings their own guests the same way the host can, and
+   * `removeGuest` already lets them take that guest back off later via
+   * `added_by`. A guest counts toward min/max like any player.
    */
   async addGuest(
     id: string,
@@ -412,8 +415,17 @@ export class GamesService {
   ): Promise<GameDocument> {
     const dto = await validateDto(InitialPlayerDto, payload);
     const game = await this.findByIdOrFail(id);
-    this.assertHost(game, userId);
     this.assertNotTerminal(game);
+
+    const isHost = game.host.toString() === userId;
+    const isJoinedParticipant = game.participants.some(
+      (p) => p.user?.toString() === userId && p.status === ParticipantStatus.Joined,
+    );
+    if (!isHost && !isJoinedParticipant) {
+      throw new ForbiddenException(
+        'Only the host or a joined player can add a guest',
+      );
+    }
 
     if (game.status === GameStatus.Locked) {
       throw new BadRequestException('Game is full');

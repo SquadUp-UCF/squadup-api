@@ -563,12 +563,28 @@ describe('GamesService', () => {
       expect(game.save).toHaveBeenCalled();
     });
 
-    it('forbids a non-host from adding a guest', async () => {
+    it('forbids a stranger (not host, not on the roster) from adding a guest', async () => {
       const game = makeGame();
       model.findById.mockReturnValue(queryStub(game));
       await expect(
         service.addGuest('game-id', 'stranger', { name: 'Sam' }),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets a joined non-host player add a guest of their own', async () => {
+      const game = makeGame({
+        max_players: 4,
+        participants: [
+          { user: 'host-id', status: ParticipantStatus.Joined },
+          { user: 'u2', status: ParticipantStatus.Joined },
+        ],
+      });
+      model.findById.mockReturnValue(queryStub(game));
+
+      await service.addGuest('game-id', 'u2', { name: 'Sam Lee' });
+
+      expect(game.participants).toHaveLength(3);
+      expect(game.participants[2]).toMatchObject({ name: 'Sam Lee', added_by: 'u2' });
     });
 
     it('rejects adding a guest to a full roster', async () => {
