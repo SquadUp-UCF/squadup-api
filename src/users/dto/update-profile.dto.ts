@@ -40,14 +40,4 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsObject()
   skill_levels?: Record<string, string>;
-
-  @ApiPropertyOptional({
-    description: 'Preferred playing position per sport, keyed by sport.',
-    example: { soccer: 'Goalkeeper', basketball: 'Point Guard' },
-    type: 'object',
-    additionalProperties: { type: 'string' },
-  })
-  @IsOptional()
-  @IsObject()
-  sport_positions?: Record<string, string>;
 }

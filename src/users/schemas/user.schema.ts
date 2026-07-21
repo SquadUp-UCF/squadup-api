@@ -55,19 +55,6 @@ export class User {
   @Prop({ default: 5.0, min: 0, max: 5 })
   reputation: number;
 
-  // Count of matches the player failed to show up for.
-  @Prop({ default: 0 })
-  no_show_count: number;
-
-  // Derived "flaker" flag, toggled later once no_show_count crosses a threshold.
-  @Prop({ default: false })
-  is_flaker: boolean;
-
-  // Reports for trash talk / dirty play. Suspend-at-10 logic lands with the
-  // reputation module; for now this is just the counter.
-  @Prop({ default: 0 })
-  reputation_reports: number;
-
   // Single source of truth for suspension/verification state.
   @Prop({
     type: String,
@@ -80,18 +67,6 @@ export class User {
   // { soccer: 'Intermediate' }). The canonical skill store. Free text.
   @Prop({ type: Map, of: String, default: {} })
   skill_levels: Map<string, string>;
-
-  // Deprecated, read-only legacy skill-level map. No longer written (clients
-  // migrated to `skill_levels`); still returned so old profiles' skill data is
-  // readable as a fallback until it's re-saved under `skill_levels`.
-  @Prop({ type: Map, of: String, default: {} })
-  preferred_positions: Map<string, string>;
-
-  // Preferred playing position per sport, keyed by sport (e.g.
-  // { soccer: 'Goalkeeper' }). Independent of skill so a player can record both
-  // how good they are and where they play. Free text.
-  @Prop({ type: Map, of: String, default: {} })
-  sport_positions: Map<string, string>;
 
   // Games hosted by this user. Fully wired once the Game schema exists.
   //
