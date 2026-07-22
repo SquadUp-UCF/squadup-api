@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ForbiddenException,
   HttpException,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -477,11 +478,17 @@ describe('AuthService', () => {
 
       await service.forgotPassword({ email });
 
+      const after = Date.now();
       expect(sentToken()).toHaveLength(64); // 32 bytes, hex-encoded
       const { expires_at } = passwordResetModel.create.mock.calls[0][0];
-      const ttl = expires_at.getTime() - before;
-      expect(ttl).toBeGreaterThan(59 * 60 * 1000);
-      expect(ttl).toBeLessThanOrEqual(60 * 60 * 1000);
+      // The service sets expires_at to Date.now() + 1h at some instant during
+      // the call, so it must land within [before + 1h, after + 1h]. Comparing
+      // against `before` alone made the upper bound off by however many ms the
+      // call took, which flaked as 3600001 > 3600000.
+      const expiry = expires_at.getTime();
+      const oneHour = 60 * 60 * 1000;
+      expect(expiry).toBeGreaterThanOrEqual(before + oneHour);
+      expect(expiry).toBeLessThanOrEqual(after + oneHour);
     });
 
     it('invalidates older links before issuing a new one', async () => {
@@ -518,12 +525,20 @@ describe('AuthService', () => {
     });
 
     it('surfaces a failed send as 502', async () => {
+      // The service logs the Resend error before throwing; silence it here so the
+      // expected failure doesn't print a red ERROR line in the passing test output.
+      const errorLog = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
       usersService.findByEmail.mockResolvedValue(activeUser);
       resend.emails.send.mockResolvedValue({ error: { message: 'nope' } });
 
       await expect(service.forgotPassword({ email })).rejects.toBeInstanceOf(
         HttpException,
       );
+
+      expect(errorLog).toHaveBeenCalled();
+      errorLog.mockRestore();
     });
   });
 
